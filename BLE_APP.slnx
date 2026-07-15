@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="BLE_APP.csproj">
+    <Deploy Solution="Debug|*" />
+  </Project>
+</Solution>

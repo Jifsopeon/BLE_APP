@@ -1,0 +1,490 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:pageModels="clr-namespace:BLE_APP.PageModels"
+             xmlns:models="clr-namespace:BLE_APP.Models"
+             xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
+             xmlns:lvc="clr-namespace:LiveChartsCore.SkiaSharpView.Maui;assembly=LiveChartsCore.SkiaSharpView.Maui"
+             x:Class="BLE_APP.Pages.MainPage"
+             x:DataType="pageModels:MainPageModel"
+             x:Name="IaqPage"
+             Title="PSE84 IAQ">
+
+    <ContentPage.Behaviors>
+        <toolkit:EventToCommandBehavior
+            BindingContext="{Binding Path=BindingContext, Source={x:Reference IaqPage}, x:DataType=ContentPage}"
+            EventName="Appearing"
+            Command="{Binding AppearingCommand}" />
+        <toolkit:EventToCommandBehavior
+            BindingContext="{Binding Path=BindingContext, Source={x:Reference IaqPage}, x:DataType=ContentPage}"
+            EventName="Disappearing"
+            Command="{Binding DisappearingCommand}" />
+    </ContentPage.Behaviors>
+
+    <ScrollView>
+        <Grid Padding="24" RowSpacing="18" ColumnSpacing="16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <VerticalStackLayout Grid.Row="0" Spacing="4">
+                <Label Text="PSE84 IAQ Monitor"
+                       FontSize="28"
+                       FontAttributes="Bold"
+                       SemanticProperties.HeadingLevel="Level1" />
+                <Label Text="{Binding StatusText}"
+                       FontSize="16"
+                       TextColor="{AppThemeBinding Light=#555555, Dark=#D0D0D0}" />
+            </VerticalStackLayout>
+
+            <Border Grid.Row="1"
+                    Stroke="#2F3136"
+                    StrokeThickness="2"
+                    Padding="16"
+                    BackgroundColor="{AppThemeBinding Light=#FAFAFA, Dark=#202124}">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="6" />
+                </Border.StrokeShape>
+                <Grid RowSpacing="14">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <VerticalStackLayout Spacing="2">
+                            <Label Text="Live readings"
+                                   FontSize="18"
+                                   FontAttributes="Bold" />
+                            <Label Text="{Binding PacketText}"
+                                   FontSize="13"
+                                   TextColor="{AppThemeBinding Light=#666666, Dark=#C8C8C8}" />
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Grid.Column="1"
+                                             HorizontalOptions="End"
+                                             Spacing="2">
+                            <Label Text="Last update"
+                                   FontSize="12"
+                                   HorizontalTextAlignment="End"
+                                   TextColor="{AppThemeBinding Light=#666666, Dark=#C8C8C8}" />
+                            <Label Text="{Binding LatestUpdateText}"
+                                   FontSize="18"
+                                   FontAttributes="Bold"
+                                   HorizontalTextAlignment="End" />
+                        </VerticalStackLayout>
+                    </Grid>
+
+                    <CollectionView Grid.Row="1"
+                                    ItemsSource="{Binding Metrics}"
+                                    SelectionMode="None">
+                        <CollectionView.ItemsLayout>
+                            <GridItemsLayout Orientation="Vertical"
+                                             Span="3"
+                                             HorizontalItemSpacing="10"
+                                             VerticalItemSpacing="10" />
+                        </CollectionView.ItemsLayout>
+                        <CollectionView.ItemTemplate>
+                            <DataTemplate x:DataType="models:SensorMetric">
+                                <Border Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
+                                        StrokeThickness="1"
+                                        Padding="12"
+                                        BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#151618}">
+                                    <Border.StrokeShape>
+                                        <RoundRectangle CornerRadius="6" />
+                                    </Border.StrokeShape>
+                                    <VerticalStackLayout Spacing="4">
+                                        <Label Text="{Binding Name}"
+                                               FontSize="13"
+                                               TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
+                                        <Label Text="{Binding Value}"
+                                               FontSize="24"
+                                               FontAttributes="Bold"
+                                               LineBreakMode="TailTruncation" />
+                                        <Label Text="{Binding Unit}"
+                                               FontSize="12"
+                                               TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
+                                    </VerticalStackLayout>
+                                </Border>
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+                    </CollectionView>
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="2"
+                    Stroke="#2F3136"
+                    StrokeThickness="2"
+                    Padding="16"
+                    BackgroundColor="{AppThemeBinding Light=#FAFAFA, Dark=#202124}">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="6" />
+                </Border.StrokeShape>
+                <Grid RowSpacing="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <VerticalStackLayout Spacing="2">
+                        <Label Text="Live graphs"
+                               FontSize="18"
+                               FontAttributes="Bold" />
+                        <Label Text="Waiting for sensor samples"
+                               FontSize="13"
+                               IsVisible="{Binding IsWaitingForReading}"
+                               TextColor="{AppThemeBinding Light=#666666, Dark=#C8C8C8}" />
+                    </VerticalStackLayout>
+                    <VerticalStackLayout Grid.Row="1"
+                                         x:Name="GraphPanel"
+                                         Spacing="12">
+                        <Grid ColumnSpacing="12"
+                              RowSpacing="12">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
+                                    StrokeThickness="1"
+                                    Padding="12"
+                                    BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#151618}">
+                                <Border.StrokeShape>
+                                    <RoundRectangle CornerRadius="6" />
+                                </Border.StrokeShape>
+                                <Grid RowSpacing="10">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="250" />
+                                    </Grid.RowDefinitions>
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <Label Text="Particulate Matter"
+                                               FontSize="16"
+                                               FontAttributes="Bold" />
+                                        <Label Grid.Column="1"
+                                               Text="µg/m³"
+                                               FontSize="12"
+                                               TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
+                                    </Grid>
+                                    <HorizontalStackLayout Grid.Row="1"
+                                                           Spacing="12">
+                                        <CheckBox IsChecked="{Binding IsPm1Visible, Mode=TwoWay}" />
+                                        <Label Text="PM1.0" VerticalOptions="Center" FontSize="12" />
+                                        <CheckBox IsChecked="{Binding IsPm25Visible, Mode=TwoWay}" />
+                                        <Label Text="PM2.5" VerticalOptions="Center" FontSize="12" />
+                                        <CheckBox IsChecked="{Binding IsPm4Visible, Mode=TwoWay}" />
+                                        <Label Text="PM4.0" VerticalOptions="Center" FontSize="12" />
+                                        <CheckBox IsChecked="{Binding IsPm10Visible, Mode=TwoWay}" />
+                                        <Label Text="PM10.0" VerticalOptions="Center" FontSize="12" />
+                                    </HorizontalStackLayout>
+                                    <lvc:CartesianChart x:Name="PmChart"
+                                                        Grid.Row="2"
+                                                        Series="{Binding PmSeries}"
+                                                        XAxes="{Binding PmXAxes}"
+                                                        YAxes="{Binding PmYAxes}"
+                                                        MinimumHeightRequest="250"
+                                                        HeightRequest="250"
+                                                        HandlerChanged="OnLiveChartHandlerChanged"
+                                                        Loaded="OnLiveChartLoaded"
+                                                        SizeChanged="OnLiveChartSizeChanged" />
+                                </Grid>
+                            </Border>
+
+                            <Border Grid.Column="1"
+                                    Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
+                                    StrokeThickness="1"
+                                    Padding="12"
+                                    BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#151618}">
+                                <Border.StrokeShape>
+                                    <RoundRectangle CornerRadius="6" />
+                                </Border.StrokeShape>
+                                <Grid RowSpacing="10">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="250" />
+                                    </Grid.RowDefinitions>
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <Label Text="VOC and NOx"
+                                               FontSize="16"
+                                               FontAttributes="Bold" />
+                                        <Label Grid.Column="1"
+                                               Text="index"
+                                               FontSize="12"
+                                               TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
+                                    </Grid>
+                                    <HorizontalStackLayout Grid.Row="1"
+                                                           Spacing="12">
+                                        <CheckBox IsChecked="{Binding IsVocVisible, Mode=TwoWay}" />
+                                        <Label Text="VOC" VerticalOptions="Center" FontSize="12" />
+                                        <CheckBox IsChecked="{Binding IsNoxVisible, Mode=TwoWay}" />
+                                        <Label Text="NOx" VerticalOptions="Center" FontSize="12" />
+                                    </HorizontalStackLayout>
+                                    <lvc:CartesianChart x:Name="VocNoxChart"
+                                                        Grid.Row="2"
+                                                        Series="{Binding VocNoxSeries}"
+                                                        XAxes="{Binding VocNoxXAxes}"
+                                                        YAxes="{Binding VocNoxYAxes}"
+                                                        MinimumHeightRequest="250"
+                                                        HeightRequest="250"
+                                                        HandlerChanged="OnLiveChartHandlerChanged"
+                                                        Loaded="OnLiveChartLoaded"
+                                                        SizeChanged="OnLiveChartSizeChanged" />
+                                </Grid>
+                            </Border>
+
+                            <Border Grid.Row="1"
+                                    Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
+                                    StrokeThickness="1"
+                                    Padding="12"
+                                    BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#151618}">
+                                <Border.StrokeShape>
+                                    <RoundRectangle CornerRadius="6" />
+                                </Border.StrokeShape>
+                                <Grid RowSpacing="10">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="250" />
+                                    </Grid.RowDefinitions>
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <Label Text="Humidity"
+                                               FontSize="16"
+                                               FontAttributes="Bold" />
+                                        <Label Grid.Column="1"
+                                               Text="% RH"
+                                               FontSize="12"
+                                               TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
+                                    </Grid>
+                                    <BoxView Grid.Row="1" HeightRequest="22" Opacity="0" />
+                                    <lvc:CartesianChart x:Name="HumidityChart"
+                                                        Grid.Row="2"
+                                                        Series="{Binding HumiditySeries}"
+                                                        XAxes="{Binding HumidityXAxes}"
+                                                        YAxes="{Binding HumidityYAxes}"
+                                                        MinimumHeightRequest="250"
+                                                        HeightRequest="250"
+                                                        HandlerChanged="OnLiveChartHandlerChanged"
+                                                        Loaded="OnLiveChartLoaded"
+                                                        SizeChanged="OnLiveChartSizeChanged" />
+                                </Grid>
+                            </Border>
+
+                            <Border Grid.Row="1"
+                                    Grid.Column="1"
+                                    Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
+                                    StrokeThickness="1"
+                                    Padding="12"
+                                    BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#151618}">
+                                <Border.StrokeShape>
+                                    <RoundRectangle CornerRadius="6" />
+                                </Border.StrokeShape>
+                                <Grid RowSpacing="10">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="250" />
+                                    </Grid.RowDefinitions>
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <Label Text="Temperature"
+                                               FontSize="16"
+                                               FontAttributes="Bold" />
+                                        <Label Grid.Column="1"
+                                               Text="°C"
+                                               FontSize="12"
+                                               TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
+                                    </Grid>
+                                    <BoxView Grid.Row="1" HeightRequest="22" Opacity="0" />
+                                    <lvc:CartesianChart x:Name="TemperatureChart"
+                                                        Grid.Row="2"
+                                                        Series="{Binding TemperatureSeries}"
+                                                        XAxes="{Binding TemperatureXAxes}"
+                                                        YAxes="{Binding TemperatureYAxes}"
+                                                        MinimumHeightRequest="250"
+                                                        HeightRequest="250"
+                                                        HandlerChanged="OnLiveChartHandlerChanged"
+                                                        Loaded="OnLiveChartLoaded"
+                                                        SizeChanged="OnLiveChartSizeChanged" />
+                                </Grid>
+                            </Border>
+
+                            <Border Grid.Row="2"
+                                    Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
+                                    StrokeThickness="1"
+                                    Padding="12"
+                                    BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#151618}">
+                                <Border.StrokeShape>
+                                    <RoundRectangle CornerRadius="6" />
+                                </Border.StrokeShape>
+                                <Grid RowSpacing="10">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="250" />
+                                    </Grid.RowDefinitions>
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <Label Text="CO2"
+                                               FontSize="16"
+                                               FontAttributes="Bold" />
+                                        <Label Grid.Column="1"
+                                               Text="ppm"
+                                               FontSize="12"
+                                               TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
+                                    </Grid>
+                                    <BoxView Grid.Row="1" HeightRequest="22" Opacity="0" />
+                                    <lvc:CartesianChart x:Name="Co2Chart"
+                                                        Grid.Row="2"
+                                                        Series="{Binding Co2Series}"
+                                                        XAxes="{Binding Co2XAxes}"
+                                                        YAxes="{Binding Co2YAxes}"
+                                                        MinimumHeightRequest="250"
+                                                        HeightRequest="250"
+                                                        HandlerChanged="OnLiveChartHandlerChanged"
+                                                        Loaded="OnLiveChartLoaded"
+                                                        SizeChanged="OnLiveChartSizeChanged" />
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </VerticalStackLayout>
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="3"
+                    Stroke="#2F3136"
+                    StrokeThickness="2"
+                    Padding="16"
+                    BackgroundColor="{AppThemeBinding Light=#FAFAFA, Dark=#202124}">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="6" />
+                </Border.StrokeShape>
+                <Grid RowSpacing="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Label Text="Live input"
+                           FontSize="18"
+                           FontAttributes="Bold" />
+                    <Grid Grid.Row="1"
+                          ColumnDefinitions="Auto,*,Auto"
+                          RowDefinitions="Auto,Auto"
+                          ColumnSpacing="12"
+                          RowSpacing="8">
+                        <Label Text="Device"
+                               FontAttributes="Bold" />
+                        <Label Grid.Column="1"
+                               Text="{Binding DeviceName}" />
+                        <Label Grid.Column="2"
+                               Text="{Binding ConnectionState}" />
+                        <Label Grid.Row="1"
+                               Text="Error"
+                               FontAttributes="Bold" />
+                        <Label Grid.Row="1"
+                               Grid.Column="1"
+                               Grid.ColumnSpan="2"
+                               Text="{Binding ErrorText}"
+                               TextColor="#B3261E"
+                               LineBreakMode="WordWrap" />
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="4"
+                  ColumnDefinitions="*,Auto,Auto"
+                  ColumnSpacing="10">
+                <SearchBar Placeholder="Search devices"
+                           Text="{Binding SearchText}"
+                           HeightRequest="44" />
+                <Button Grid.Column="1"
+                        Text="Scan"
+                        Command="{Binding ScanCommand}"
+                        HeightRequest="44" />
+                <Button Grid.Column="2"
+                        Text="Cancel"
+                        Command="{Binding CancelScanCommand}"
+                        HeightRequest="44" />
+            </Grid>
+
+            <Grid Grid.Row="5"
+                  ColumnDefinitions="*,Auto,Auto"
+                  ColumnSpacing="10">
+                <CollectionView ItemsSource="{Binding Devices}"
+                                SelectedItem="{Binding SelectedDevice}"
+                                SelectionMode="Single"
+                                HeightRequest="150">
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate x:DataType="models:DiscoveredSensorDevice">
+                            <Grid Padding="8"
+                                  ColumnDefinitions="*,Auto"
+                                  RowDefinitions="Auto,Auto">
+                                <Label Text="{Binding Name}"
+                                       FontAttributes="Bold" />
+                                <Label Grid.Column="1"
+                                       Text="{Binding SignalStrengthDbm, StringFormat='{0} dBm'}" />
+                                <Label Grid.Row="1"
+                                       Text="{Binding Id}"
+                                       FontSize="12"
+                                       TextColor="{AppThemeBinding Light=#666666, Dark=#C8C8C8}" />
+                                <Label Grid.Row="1"
+                                       Grid.Column="1"
+                                       Text="IAQ"
+                                       IsVisible="{Binding AdvertisesExpectedService}"
+                                       FontSize="12" />
+                            </Grid>
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                </CollectionView>
+
+                <Button Grid.Column="1"
+                        Text="Connect"
+                        Command="{Binding ConnectCommand}"
+                        HeightRequest="44"
+                        VerticalOptions="Start" />
+                <VerticalStackLayout Grid.Column="2"
+                                     Spacing="8">
+                    <Button Text="Disconnect"
+                            Command="{Binding DisconnectCommand}"
+                            HeightRequest="44" />
+                    <Button Text="Reconnect"
+                            Command="{Binding ReconnectCommand}"
+                            HeightRequest="44" />
+                </VerticalStackLayout>
+            </Grid>
+
+            <Border Grid.Row="6"
+                    Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
+                    StrokeThickness="1"
+                    Padding="12"
+                    BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#151618}">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="6" />
+                </Border.StrokeShape>
+                <VerticalStackLayout Spacing="8">
+                    <Label Text="Diagnostics"
+                           FontAttributes="Bold" />
+                    <CollectionView ItemsSource="{Binding Diagnostics}"
+                                    SelectionMode="None"
+                                    HeightRequest="180">
+                        <CollectionView.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                                <Label Text="{Binding .}"
+                                       FontSize="12"
+                                       LineBreakMode="WordWrap" />
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+                    </CollectionView>
+                </VerticalStackLayout>
+            </Border>
+        </Grid>
+    </ScrollView>
+</ContentPage>

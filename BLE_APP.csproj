@@ -1,0 +1,122 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFrameworks>net10.0-android</TargetFrameworks>
+		<TargetFrameworks Condition="!$([MSBuild]::IsOSPlatform('linux'))">$(TargetFrameworks);net10.0-ios;net10.0-maccatalyst</TargetFrameworks>
+		<TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net10.0-windows10.0.22621.0</TargetFrameworks>
+
+		<!-- Note for MacCatalyst:
+		The default runtime is maccatalyst-x64, except in Release config, in which case the default is maccatalyst-x64;maccatalyst-arm64.
+		When specifying both architectures, use the plural <RuntimeIdentifiers> instead of the singular <RuntimeIdentifier>.
+		The Mac App Store will NOT accept apps with ONLY maccatalyst-arm64 indicated;
+		either BOTH runtimes must be indicated or ONLY macatalyst-x64. -->
+		<!-- For example: <RuntimeIdentifiers>maccatalyst-x64;maccatalyst-arm64</RuntimeIdentifiers> -->
+
+		<OutputType>Exe</OutputType>
+		<RootNamespace>BLE_APP</RootNamespace>
+		<UseMaui>true</UseMaui>
+		<SingleProject>true</SingleProject>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<Platforms>AnyCPU;x64</Platforms>
+
+		<!-- Enable XAML source generation for faster build times and improved performance.
+		     This generates C# code from XAML at compile time instead of runtime inflation.
+		     To disable, remove this line.
+		     For individual files, you can override by setting Inflator metadata:
+		       <MauiXaml Update="MyPage.xaml" Inflator="Default" /> (reverts to defaults: Runtime for Debug, XamlC for Release)
+		       <MauiXaml Update="MyPage.xaml" Inflator="Runtime" /> (force runtime inflation) -->
+		<MauiXamlInflator>SourceGen</MauiXamlInflator>
+		<MauiEnableXamlCBindingWithSourceCompilation>true</MauiEnableXamlCBindingWithSourceCompilation>
+
+		<!-- Display name -->
+		<ApplicationTitle>BLE_APP</ApplicationTitle>
+
+		<!-- App Identifier -->
+		<ApplicationId>com.companyname.bleapp</ApplicationId>
+
+		<!-- Versions -->
+		<ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+		<ApplicationVersion>1</ApplicationVersion>
+
+		<WindowsPackageType>MSIX</WindowsPackageType>
+		<RuntimeIdentifier Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows' And '$(Platform)' == 'x64'">win-x64</RuntimeIdentifier>
+
+		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">15.0</SupportedOSPlatformVersion>
+		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">15.0</SupportedOSPlatformVersion>
+		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">21.0</SupportedOSPlatformVersion>
+		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
+		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-android' and '$(Configuration)' == 'Debug'">
+		<EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<!-- App Icon -->
+		<MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#17171a" />
+
+		<!-- Splash Screen -->
+		<MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#17171a" BaseSize="128,128" />
+
+		<!-- Images -->
+		<MauiImage Include="Resources\Images\*" />
+		<!-- Custom Fonts -->
+		<MauiFont Include="Resources\Fonts\*" />
+
+		<!-- Raw Assets (also remove the "Resources\Raw" prefix) -->
+		<MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Compile Remove="Data\**" />
+		<Compile Remove="Tests\**" />
+		<Compile Remove="Pages\Controls\**" />
+		<Compile Remove="Pages\ProjectListPage.xaml.cs" />
+		<Compile Remove="Pages\ProjectDetailPage.xaml.cs" />
+		<Compile Remove="Pages\TaskDetailPage.xaml.cs" />
+		<Compile Remove="Pages\ManageMetaPage.xaml.cs" />
+		<Compile Remove="PageModels\ProjectListPageModel.cs" />
+		<Compile Remove="PageModels\ProjectDetailPageModel.cs" />
+		<Compile Remove="PageModels\TaskDetailPageModel.cs" />
+		<Compile Remove="PageModels\ManageMetaPageModel.cs" />
+		<Compile Remove="PageModels\IProjectTaskPageModel.cs" />
+		<Compile Remove="Utilities\ProjectExtensions.cs" />
+		<Compile Remove="Utilities\TaskUtilities.cs" />
+		<Compile Remove="Services\ModalErrorHandler.cs" />
+		<Compile Remove="Services\IErrorHandler.cs" />
+		<Compile Remove="Models\Category.cs" />
+		<Compile Remove="Models\CategoryChartData.cs" />
+		<Compile Remove="Models\IconData.cs" />
+		<Compile Remove="Models\Project.cs" />
+		<Compile Remove="Models\ProjectTask.cs" />
+		<Compile Remove="Models\ProjectsTags.cs" />
+		<Compile Remove="Models\Tag.cs" />
+		<MauiXaml Remove="Pages\Controls\**" />
+		<MauiXaml Remove="Pages\ProjectListPage.xaml" />
+		<MauiXaml Remove="Pages\ProjectDetailPage.xaml" />
+		<MauiXaml Remove="Pages\TaskDetailPage.xaml" />
+		<MauiXaml Remove="Pages\ManageMetaPage.xaml" />
+		<MauiXaml Remove="Resources\Styles\Styles.xaml" />
+		<MauiXaml Remove="Resources\Styles\AppStyles.xaml" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="LiveChartsCore.SkiaSharpView.Maui" Version="2.0.5" />
+		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\..\..\Documents\IAQ_PSE84\Plugin.Bluetooth-main\Plugin.Bluetooth-main\Bluetooth.Maui\Bluetooth.Maui.csproj" />
+		<ProjectReference Include="..\..\..\Documents\IAQ_PSE84\Plugin.Bluetooth-main\Plugin.Bluetooth-main\Bluetooth.Abstractions\Bluetooth.Abstractions.csproj" />
+		<ProjectReference Include="..\..\..\Documents\IAQ_PSE84\Plugin.Bluetooth-main\Plugin.Bluetooth-main\Bluetooth.Abstractions.Scanning\Bluetooth.Abstractions.Scanning.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
+		<PackageReference Include="CommunityToolkit.Maui" Version="12.3.0" />
+	</ItemGroup>
+	
+</Project>

@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "BLE_APP (Package)": {
+      "commandName": "MsixPackage",
+      "nativeDebugging": false
+    }
+  }
+}
