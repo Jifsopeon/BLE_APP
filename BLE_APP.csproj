@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<TargetFrameworks>net10.0-android</TargetFrameworks>
@@ -70,6 +70,12 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<Compile Remove="ThirdParty\**" />
+		<EmbeddedResource Remove="ThirdParty\**" />
+		<None Remove="ThirdParty\**" />
+		<MauiXaml Remove="ThirdParty\**" />
+		<MauiImage Remove="ThirdParty\**" />
+		<MauiAsset Remove="ThirdParty\**" />
 		<Compile Remove="Data\**" />
 		<Compile Remove="Tests\**" />
 		<Compile Remove="Pages\Controls\**" />
@@ -109,9 +115,9 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\..\..\Documents\IAQ_PSE84\Plugin.Bluetooth-main\Plugin.Bluetooth-main\Bluetooth.Maui\Bluetooth.Maui.csproj" />
-		<ProjectReference Include="..\..\..\Documents\IAQ_PSE84\Plugin.Bluetooth-main\Plugin.Bluetooth-main\Bluetooth.Abstractions\Bluetooth.Abstractions.csproj" />
-		<ProjectReference Include="..\..\..\Documents\IAQ_PSE84\Plugin.Bluetooth-main\Plugin.Bluetooth-main\Bluetooth.Abstractions.Scanning\Bluetooth.Abstractions.Scanning.csproj" />
+		<ProjectReference Include="ThirdParty\Plugin.Bluetooth\Bluetooth.Maui\Bluetooth.Maui.csproj" />
+		<ProjectReference Include="ThirdParty\Plugin.Bluetooth\Bluetooth.Abstractions\Bluetooth.Abstractions.csproj" />
+		<ProjectReference Include="ThirdParty\Plugin.Bluetooth\Bluetooth.Abstractions.Scanning\Bluetooth.Abstractions.Scanning.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>

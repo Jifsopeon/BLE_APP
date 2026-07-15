@@ -1,0 +1,30 @@
+using Bluetooth.Maui.Platforms.Apple.Broadcasting.NativeObjects;
+
+namespace Bluetooth.Maui.Platforms.Apple.Broadcasting;
+
+/// <summary>
+///     Extension methods for registering Bluetooth services in a service collection.
+/// </summary>
+public static class ServiceCollectionExtensions
+{
+    /// <summary>
+    ///     Adds Bluetooth broadcaster services to the service collection.
+    ///     Registers all core Bluetooth services including the adapter, scanner, broadcaster,
+    ///     and characteristic access services as singletons.
+    /// </summary>
+    /// <param name="services">The service collection to add services to.</param>
+    /// <returns>The updated service collection for method chaining.</returns>
+    public static void AddBluetoothMauiAppleBroadcastingServices(this IServiceCollection services)
+    {
+        services.AddSingleton<IBluetoothBroadcaster, AppleBluetoothBroadcaster>();
+
+        // Configure CBPeripheralManager options
+        services.Configure<CbPeripheralManagerOptions>(options => {
+            options.ShowPowerAlert = true;
+            options.RestoreIdentifierKey = "com.bluetooth.maui.peripheralmanager.restore";
+        });
+
+        // Note: CbPeripheralManagerWrapper is NOT registered in DI - it's created by AppleBluetoothBroadcaster
+        // because it needs the broadcaster as its delegate (circular dependency)
+    }
+}

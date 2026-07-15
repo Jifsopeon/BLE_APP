@@ -1,0 +1,25 @@
+using Bluetooth.Maui.Platforms.Win.Scanning.Factories;
+
+namespace Bluetooth.Maui.Platforms.Win.Scanning;
+
+/// <summary>
+///     Extension methods for registering Windows Bluetooth scanning services in a service collection.
+/// </summary>
+public static class ServiceCollectionExtensions
+{
+    /// <summary>
+    ///     Adds Windows-specific Bluetooth scanning services to the service collection.
+    ///     Registers device, service, characteristic, and descriptor factories as singletons.
+    /// </summary>
+    /// <param name="services">The service collection to add services to.</param>
+    public static void AddBluetoothMauiWindowsScanningServices(this IServiceCollection services)
+    {
+        services.AddSingleton<IBluetoothScanner, WindowsBluetoothScanner>();
+
+        // Register factories
+        services.AddSingleton<IBluetoothRemoteDeviceFactory, WindowsBluetoothRemoteDeviceFactory>();
+        services.AddSingleton<IBluetoothRemoteServiceFactory, WindowsBluetoothServiceFactory>();
+        services.AddSingleton<IBluetoothRemoteCharacteristicFactory, WindowsBluetoothRemoteCharacteristicFactory>();
+        services.AddSingleton<IBluetoothRemoteDescriptorFactory, WindowsBluetoothRemoteDescriptorFactory>();
+    }
+}
