@@ -12,4 +12,6 @@ public sealed record SensorReading(
     double? Nox,
     double? Voc,
     ushort? Co2,
-    double DistanceMetres);
+    double DistanceMetres,
+    ManualLabelState ManualLabel,
+    byte ManualLabelRaw);

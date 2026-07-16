@@ -8,10 +8,16 @@
 
   <ItemGroup>
     <Compile Include="..\..\Services\SensorPacketDecoder.cs" Link="Services\SensorPacketDecoder.cs" />
+    <Compile Include="..\..\Services\SensorPacketProtocol.cs" Link="Services\SensorPacketProtocol.cs" />
+    <Compile Include="..\..\Services\SensorCsvFormatter.cs" Link="Services\SensorCsvFormatter.cs" />
+    <Compile Include="..\..\Services\SensorLogFileNameAllocator.cs" Link="Services\SensorLogFileNameAllocator.cs" />
+    <Compile Include="..\..\Services\SensorLogModels.cs" Link="Services\SensorLogModels.cs" />
+    <Compile Include="..\..\Services\ISensorLogService.cs" Link="Services\ISensorLogService.cs" />
     <Compile Include="..\..\Services\IBluetoothSensorService.cs" Link="Services\IBluetoothSensorService.cs" />
     <Compile Include="..\..\PageModels\MainPageModel.cs" Link="PageModels\MainPageModel.cs" />
     <Compile Include="..\..\Models\BluetoothConnectionState.cs" Link="Models\BluetoothConnectionState.cs" />
     <Compile Include="..\..\Models\DiscoveredSensorDevice.cs" Link="Models\DiscoveredSensorDevice.cs" />
+    <Compile Include="..\..\Models\ManualLabelState.cs" Link="Models\ManualLabelState.cs" />
     <Compile Include="..\..\Models\SensorMetric.cs" Link="Models\SensorMetric.cs" />
     <Compile Include="..\..\Models\SensorReading.cs" Link="Models\SensorReading.cs" />
   </ItemGroup>

@@ -38,12 +38,17 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
     private static readonly TimeSpan DiscoveryTimeout = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan SubscribeTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan DescriptorDiscoveryTimeout = TimeSpan.FromSeconds(10);
+#if DEBUG
     private const ulong RawPacketLogLimit = 5;
+#endif
+    private const ulong IncompatiblePacketWarningLimit = 5;
+    private const ulong IncompatiblePacketWarningInterval = 100;
     private const int AndroidRequestedMtu = 247;
     private const int RequiredNotificationPayloadLength = SensorPacketDecoder.PacketLength;
 
     private readonly IBluetoothScanner _scanner;
     private readonly SensorPacketDecoder _decoder;
+    private readonly ISensorLogService _sensorLog;
     private readonly ILogger<BluetoothSensorService> _logger;
     private readonly SemaphoreSlim _connectionGate = new(1, 1);
     private readonly object _scanGate = new();
@@ -63,8 +68,11 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
     private long _subscribedConnectionGeneration;
 #endif
     private ushort? _lastSequenceNumber;
+#if DEBUG
     private ulong _rawPacketLogCount;
+#endif
     private ulong _validReadingLogCount;
+    private ulong _incompatiblePacketWarningCount;
     private bool _userDisconnectRequested;
     private bool _disposed;
 
@@ -80,10 +88,12 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
     public BluetoothSensorService(
         IBluetoothScanner scanner,
         SensorPacketDecoder decoder,
+        ISensorLogService sensorLog,
         ILogger<BluetoothSensorService> logger)
     {
         _scanner = scanner;
         _decoder = decoder;
+        _sensorLog = sensorLog;
         _logger = logger;
         _scanner.DeviceListChanged += OnDeviceListChanged;
     }
@@ -107,6 +117,8 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
     public ulong SequenceGapsDetected { get; private set; }
 
     public DateTimeOffset? LastPacketTime { get; private set; }
+
+    public bool CanSetManualLabel { get; private set; }
 
     public async Task<IReadOnlyList<DiscoveredSensorDevice>> ScanAsync(string? filter, TimeSpan timeout, CancellationToken cancellationToken)
     {
@@ -236,6 +248,9 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
                 return;
             }
 
+            var previousGeneration = Volatile.Read(ref _connectionGeneration);
+            await _sensorLog.StopAndSaveAsync(LogStopReason.Cleanup, previousGeneration, CancellationToken.None).ConfigureAwait(false);
+
             generation = Interlocked.Increment(ref _connectionGeneration);
             LogLifecycle("Connection start", "ConnectAsync", deviceId, generation);
             _userDisconnectRequested = false;
@@ -309,6 +324,7 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
                 ?? throw new InvalidOperationException($"Sensor characteristic {SensorDataCharacteristicUuid} was not found.");
             _commandCharacteristic = RunConnectionStep("Command characteristic lookup", device, () => _currentService.GetCharacteristicOrDefault(CommandCharacteristicUuid))
                 ?? throw new InvalidOperationException($"Command characteristic {CommandCharacteristicUuid} was not found.");
+            CanSetManualLabel = true;
             Log($"[BLE-NOTIFY] Characteristic selected; DeviceId={device.Id}; ConnectionGeneration={generation}; ServiceUuid={_currentService.Id}; CharacteristicUuid={_sensorCharacteristic.Id}");
             LogGattPhase("Characteristic found", device.Id, generation, DescribeCharacteristic(_sensorCharacteristic, "SensorData"));
             LogGattPhase("Characteristic found", device.Id, generation, DescribeCharacteristic(_commandCharacteristic, "Command"));
@@ -423,9 +439,11 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
         try
         {
             _userDisconnectRequested = userInitiated;
+            var previousGeneration = Volatile.Read(ref _connectionGeneration);
             var generation = Interlocked.Increment(ref _connectionGeneration);
             LogLifecycle("Disconnect requested", userInitiated ? "UserDisconnect" : "ProgrammaticDisconnect", _currentDevice?.Id, generation);
             SetState(BluetoothConnectionState.Disconnecting);
+            await _sensorLog.StopAndSaveAsync(userInitiated ? LogStopReason.UserDisconnect : LogStopReason.ProgrammaticDisconnect, previousGeneration, CancellationToken.None).ConfigureAwait(false);
             await CleanupConnectionAsync(skipDisconnect: false, reason: userInitiated ? "UserDisconnect" : "ProgrammaticDisconnect", generation, cancellationToken).ConfigureAwait(false);
             SetState(BluetoothConnectionState.Disconnected);
             Log("Cleanup completed.");
@@ -478,6 +496,7 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
         _disposed = true;
         _scanner.DeviceListChanged -= OnDeviceListChanged;
         await DisconnectAsync(userInitiated: true, CancellationToken.None).ConfigureAwait(false);
+        await _sensorLog.StopAndSaveAsync(LogStopReason.Shutdown, Volatile.Read(ref _connectionGeneration), CancellationToken.None).ConfigureAwait(false);
         await _scanner.DisposeAsync().ConfigureAwait(false);
         _connectionGate.Dispose();
 #if !WINDOWS
@@ -520,6 +539,7 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
 
     private void ProcessSensorPacket(byte[] bytes)
     {
+        var generation = Volatile.Read(ref _connectionGeneration);
         _ = Task.Run(() =>
         {
             var packetNumber = TotalPacketsReceived + MalformedPacketsReceived + 1UL;
@@ -541,6 +561,7 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
                 LatestReading = reading;
                 TotalPacketsReceived++;
                 LastPacketTime = reading.Timestamp;
+                _ = _sensorLog.AppendAsync(reading, generation, CancellationToken.None);
 #if ANDROID
                 Log("[ANDROID-BLE] Packet decoded");
 #endif
@@ -566,13 +587,64 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
             catch (Exception ex)
             {
                 MalformedPacketsReceived++;
-                Log($"Malformed packet: {ex.Message}. Length={bytes.Length}. Payload={ToHexPayload(bytes)}", ex);
+                if (ex is SensorPacketFormatException &&
+                    ex.Message.StartsWith("Incompatible firmware packet:", StringComparison.Ordinal))
+                {
+                    _incompatiblePacketWarningCount++;
+                    if (_incompatiblePacketWarningCount <= IncompatiblePacketWarningLimit ||
+                        _incompatiblePacketWarningCount % IncompatiblePacketWarningInterval == 0)
+                    {
+                        Log($"{ex.Message} ExpectedLength={SensorPacketProtocol.PacketLength}. ActualLength={bytes.Length}. ConnectionGeneration={generation}. PacketCount={packetNumber}. Payload={ToHexPayload(bytes)}", ex);
+                    }
+                }
+                else
+                {
+                    Log($"Malformed packet: {ex.Message}. Length={bytes.Length}. ConnectionGeneration={generation}. PacketCount={packetNumber}. Payload={ToHexPayload(bytes)}", ex);
+                }
             }
         });
     }
 
     private static string ToHexPayload(byte[] bytes)
         => string.Join(" ", bytes.Select(value => value.ToString("X2")));
+
+    public async Task SetManualLabelAsync(ManualLabelState label, CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        var payload = new[] { SensorPacketProtocol.SetManualLabelCommand, SensorPacketProtocol.EncodeManualLabel(label) };
+        var generation = Volatile.Read(ref _connectionGeneration);
+
+#if WINDOWS
+        if (_windowsCommandCharacteristic is null)
+        {
+            throw new InvalidOperationException("Manual label command is unavailable until the command characteristic is discovered.");
+        }
+
+        using var writer = new DataWriter();
+        writer.WriteBytes(payload);
+        var status = await RunConnectionStepAsync(
+            "Windows native API: Manual label WriteValueAsync",
+            _currentDevice ?? throw new InvalidOperationException("No active BLE device."),
+            async () => await _windowsCommandCharacteristic.WriteValueAsync(writer.DetachBuffer(), GattWriteOption.WriteWithResponse).AsTask(cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
+        Log($"Windows native Manual label command write result: {status}; Requested={SensorPacketProtocol.FormatManualLabel(label)}; Raw={payload[1]}.");
+        if (status != GattCommunicationStatus.Success)
+        {
+            throw new InvalidOperationException($"Manual label command write returned {status}.");
+        }
+#else
+        if (_currentDevice is null || _commandCharacteristic is null)
+        {
+            throw new InvalidOperationException("Manual label command is unavailable until the command characteristic is discovered.");
+        }
+
+        await RunGattOperationAsync("Manual label command: WriteValueAsync", _currentDevice, generation, async () =>
+        {
+            await _commandCharacteristic.WriteValueAsync(payload, timeout: TimeSpan.FromSeconds(5), cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+        }).ConfigureAwait(false);
+        Log($"Manual label command written. Requested={SensorPacketProtocol.FormatManualLabel(label)}; Raw={payload[1]}.");
+#endif
+    }
 
 #if ANDROID
     private async Task NegotiateAndroidMtuAsync(IBluetoothRemoteDevice device, CancellationToken cancellationToken)
@@ -583,7 +655,7 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
             var negotiatedMtu = await device.RequestMtuAsync(AndroidRequestedMtu, TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
             var notificationPayload = Math.Max(0, negotiatedMtu - 3);
             Log($"[ANDROID-BLE] MTU negotiated={negotiatedMtu}");
-            Log($"[ANDROID-BLE] MTU payload supports 22 bytes={notificationPayload >= RequiredNotificationPayloadLength}");
+            Log($"[ANDROID-BLE] MTU payload supports {RequiredNotificationPayloadLength} bytes={notificationPayload >= RequiredNotificationPayloadLength}");
             if (notificationPayload < RequiredNotificationPayloadLength)
             {
                 throw new InvalidOperationException($"Negotiated ATT MTU {negotiatedMtu} only supports {notificationPayload} notification bytes; {RequiredNotificationPayloadLength} are required.");
@@ -610,6 +682,7 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
             return;
         }
 
+        _ = _sensorLog.StopAndSaveAsync(LogStopReason.UnexpectedDisconnect, Volatile.Read(ref _connectionGeneration), CancellationToken.None);
         SetState(BluetoothConnectionState.Disconnected);
         Log("Device disconnected unexpectedly.");
         UnexpectedlyDisconnected?.Invoke(this, EventArgs.Empty);
@@ -694,6 +767,7 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
         }
 #endif
         _lastSequenceNumber = null;
+        CanSetManualLabel = false;
     }
 
     private void TrackSequence(ushort sequenceNumber)
@@ -1242,9 +1316,12 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
             throw new InvalidOperationException("Command characteristic does not support writes.");
         }
 
+        CanSetManualLabel = true;
+
         _windowsSensorCharacteristic.ValueChanged -= OnWindowsSensorValueChanged;
         _windowsSensorCharacteristic.ValueChanged += OnWindowsSensorValueChanged;
         _windowsSensorHandlerAttached = true;
+        Log($"[BLE-RX] GattSession.MaxPduSize={_windowsGattSession.MaxPduSize} ExpectedNotificationValueLength={RequiredNotificationPayloadLength} ValueChangedHandlerAttached={_windowsSensorHandlerAttached} CCCDEnabled=false");
 
         SetState(BluetoothConnectionState.Subscribing);
         var cccdStatus = await RunConnectionStepAsync(
@@ -1258,6 +1335,7 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
         }
 
         Log("Notification subscription succeeded.");
+        Log($"[BLE-RX] GattSession.MaxPduSize={_windowsGattSession.MaxPduSize} ExpectedNotificationValueLength={RequiredNotificationPayloadLength} ValueChangedHandlerAttached={_windowsSensorHandlerAttached} CCCDEnabled=true");
 
         using var writer = new DataWriter();
         writer.WriteBytes(new byte[] { 0x01 });
@@ -1324,20 +1402,31 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
         _windowsIaqService = null;
         _windowsSensorCharacteristic = null;
         _windowsCommandCharacteristic = null;
+        CanSetManualLabel = false;
     }
 
     private void OnWindowsSensorValueChanged(GattCharacteristic sender, GattValueChangedEventArgs args)
     {
-        var reader = DataReader.FromBuffer(args.CharacteristicValue);
-        var bytes = new byte[(int)reader.UnconsumedBufferLength];
-        reader.ReadBytes(bytes);
-
-        if (TotalPacketsReceived == 0)
+        try
         {
-            Log($"Windows native first notification received. Length={bytes.Length}.");
-        }
+            Log("[BLE-RX] ValueChanged callback entered");
+            var reader = DataReader.FromBuffer(args.CharacteristicValue);
+            var bytes = new byte[(int)reader.UnconsumedBufferLength];
+            reader.ReadBytes(bytes);
+            var generation = Volatile.Read(ref _connectionGeneration);
 
-        ProcessSensorPacket(bytes);
+            Log($"[BLE-RX] ValueChanged callback entered ConnectionGeneration={generation} ReceivedLength={bytes.Length} ReceivedBytes={ToHexPayload(bytes)}");
+            if (TotalPacketsReceived == 0)
+            {
+                Log($"Windows native first notification received. Length={bytes.Length}.");
+            }
+
+            ProcessSensorPacket(bytes);
+        }
+        catch (Exception ex)
+        {
+            Log($"Windows native ValueChanged callback failed: {ex.Message}", ex);
+        }
     }
 
     private void OnWindowsNativeConnectionStatusChanged(BluetoothLEDevice sender, object args)
@@ -1358,6 +1447,7 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
                     return;
                 }
 
+                await _sensorLog.StopAndSaveAsync(LogStopReason.UnexpectedDisconnect, Volatile.Read(ref _connectionGeneration), CancellationToken.None).ConfigureAwait(false);
                 await CleanupWindowsNativeConnectionAsync(disableNotifications: false, CancellationToken.None).ConfigureAwait(false);
                 SetState(BluetoothConnectionState.Disconnected);
                 Log("Windows native device disconnected unexpectedly.");

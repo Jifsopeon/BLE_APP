@@ -6,13 +6,23 @@ using BLE_APP.Services;
 var decoder = new SensorPacketDecoder();
 
 NormalPacketDecodesAllFields();
+ActualFirmwarePacketBytesDecode();
 FirstByte03IsSequenceLowByte();
 NegativeTemperatureDecodes();
 DistanceZeroDecodesToZeroMetres();
 FutureDistance1250DecodesToOnePoint25Metres();
 Legacy20BytePacketIsRejected();
-Correct22BytePacketIsAccepted();
+Old22BytePacketIsRejected();
+ManualLabelPacketSmokingDecodes();
+ManualLabelPacketNoSmokingDecodes();
+UnknownManualLabelRawIsRejected();
 MultipleSequentialPacketsDecode();
+CsvHeaderMatchesExpectedOrder();
+CsvRowFormatsManualLabelAndRawValue();
+CsvRowUsesInvariantFormattingAndOffsetTimestamp();
+CsvRowTimeUsesSecondsWithoutMilliseconds();
+LogFilenameParsingIgnoresMalformedNames();
+LogFilenameAllocationHandlesGapsAndCollisions();
 OneReadingAddsOnePointToAllChartSeries();
 AllChartPointsFromOneReadingUseSameX();
 PmSeriesRemainAligned();
@@ -27,6 +37,7 @@ DisconnectDoesNotClearHistory();
 ReconnectDoesNotDuplicateSubscriptions();
 YAxisMinimumIsZero();
 ChartCollectionsUseViewModelUpdatePath();
+await ManualLabelUiCommandRequestsSmoking();
 
 Console.WriteLine("SensorPacketDecoder and direct chart-data tests passed.");
 
@@ -60,6 +71,41 @@ void NormalPacketDecodesAllFields()
     CloseRequired(0.0, reading.DistanceMetres, "distance");
 }
 
+void ActualFirmwarePacketBytesDecode()
+{
+    byte[] packet =
+    [
+        0x2A, 0x00,
+        0x7B, 0x00,
+        0xC8, 0x01,
+        0x15, 0x03,
+        0xE9, 0x03,
+        0xBA, 0x13,
+        0x0C, 0x12,
+        0x78, 0x00,
+        0x59, 0x01,
+        0x20, 0x03,
+        0xE2, 0x04,
+        0x01
+    ];
+
+    var reading = decoder.Decode(packet);
+
+    Equal((ushort)42, reading.SequenceNumber, "firmware sequence");
+    CloseNullable(12.3, reading.Pm1, "firmware pm1");
+    CloseNullable(45.6, reading.Pm25, "firmware pm25");
+    CloseNullable(78.9, reading.Pm4, "firmware pm4");
+    CloseNullable(100.1, reading.Pm10, "firmware pm10");
+    CloseNullable(50.5, reading.Humidity, "firmware humidity");
+    CloseNullable(23.1, reading.Temperature, "firmware temperature");
+    CloseNullable(12.0, reading.Nox, "firmware nox");
+    CloseNullable(34.5, reading.Voc, "firmware voc");
+    Equal((ushort)800, reading.Co2, "firmware co2");
+    CloseRequired(1.25, reading.DistanceMetres, "firmware distance");
+    Equal(ManualLabelState.Smoking, reading.ManualLabel, "firmware manual label");
+    Equal((byte)1, reading.ManualLabelRaw, "firmware manual label raw");
+}
+
 void FirstByte03IsSequenceLowByte()
 {
     var packet = MakePacket(sequence: 3);
@@ -88,9 +134,28 @@ void Legacy20BytePacketIsRejected()
     Throws<SensorPacketFormatException>(() => decoder.Decode(MakePacket()[..20]), "legacy 20-byte packet");
 }
 
-void Correct22BytePacketIsAccepted()
+void Old22BytePacketIsRejected()
 {
-    _ = decoder.Decode(MakePacket());
+    Throws<SensorPacketFormatException>(() => decoder.Decode(MakeLegacyPacket()), "old 22-byte packet");
+}
+
+void ManualLabelPacketSmokingDecodes()
+{
+    var reading = decoder.Decode(MakeManualPacket(SensorPacketProtocol.ManualLabelSmokingRaw));
+    Equal(ManualLabelState.Smoking, reading.ManualLabel, "manual label smoking");
+    Equal((byte)1, reading.ManualLabelRaw, "manual label smoking raw");
+}
+
+void ManualLabelPacketNoSmokingDecodes()
+{
+    var reading = decoder.Decode(MakeManualPacket(SensorPacketProtocol.ManualLabelNoSmokingRaw));
+    Equal(ManualLabelState.NoSmoking, reading.ManualLabel, "manual label no smoking");
+    Equal((byte)0, reading.ManualLabelRaw, "manual label no smoking raw");
+}
+
+void UnknownManualLabelRawIsRejected()
+{
+    Throws<SensorPacketFormatException>(() => decoder.Decode(MakeManualPacket(0x7F)), "unknown manual label raw");
 }
 
 void MultipleSequentialPacketsDecode()
@@ -99,6 +164,62 @@ void MultipleSequentialPacketsDecode()
     {
         Equal(sequence, decoder.Decode(MakePacket(sequence: sequence)).SequenceNumber, $"sequence {sequence}");
     }
+}
+
+void CsvHeaderMatchesExpectedOrder()
+{
+    Equal("Sample,Date,Time,TimestampISO8601,ElapsedSeconds,PM1_0,PM2_5,PM4_0,PM10,Humidity,Temperature,VOC,NOx,CO2,ManualLabel,ManualLabelRaw",
+        SensorCsvFormatter.Header,
+        "csv header");
+}
+
+void CsvRowFormatsManualLabelAndRawValue()
+{
+    var timestamp = DateTimeOffset.Parse("2026-07-14T08:30:15+08:00");
+    var reading = MakeReading(timestamp: timestamp);
+    var row = SensorCsvFormatter.FormatRow(1, timestamp.AddSeconds(-2), reading);
+
+    Equal(true, row.Contains(",Smoking,1", StringComparison.Ordinal), "csv manual label");
+}
+
+void CsvRowUsesInvariantFormattingAndOffsetTimestamp()
+{
+    var timestamp = DateTimeOffset.Parse("2026-07-14T08:30:15.123+08:00");
+    var row = SensorCsvFormatter.FormatRow(12, timestamp.AddSeconds(-1.5), MakeReading(timestamp: timestamp, pm1: 12.3));
+
+    Equal(true, row.Contains("2026-07-14T08:30:15.1230000+08:00", StringComparison.Ordinal), "csv timestamp offset");
+    Equal(true, row.Contains(",1.5,12.3,", StringComparison.Ordinal), "csv invariant decimals");
+}
+
+void CsvRowTimeUsesSecondsWithoutMilliseconds()
+{
+    var timestamp = DateTimeOffset.Parse("2026-07-14T08:05:09.123+08:00");
+    var row = SensorCsvFormatter.FormatRow(1, timestamp.AddSeconds(-1), MakeReading(timestamp: timestamp));
+    var columns = row.Split(',');
+
+    Equal("08:05:09", columns[2], "csv time without milliseconds");
+    Equal(false, columns[2].Contains('.', StringComparison.Ordinal), "csv time has no fractional seconds");
+}
+
+void LogFilenameParsingIgnoresMalformedNames()
+{
+    Equal(23, SensorLogFileNameAllocator.ParseLogNumber("Log0023.csv"), "parse log number");
+    Equal(0, SensorLogFileNameAllocator.ParseLogNumber("Log23.csv"), "ignore short log number");
+    Equal(0, SensorLogFileNameAllocator.ParseLogNumber("Other0023.csv"), "ignore unrelated log number");
+}
+
+void LogFilenameAllocationHandlesGapsAndCollisions()
+{
+    var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "Log0001.csv",
+        "Log0003.csv",
+        "Log0004.csv"
+    };
+
+    var fileName = SensorLogFileNameAllocator.AllocateNextFileName(existing, lastAllocatedNumber: 3, out var allocatedNumber);
+    Equal("Log0005.csv", fileName, "allocated filename");
+    Equal(5, allocatedNumber, "allocated number");
 }
 
 void OneReadingAddsOnePointToAllChartSeries()
@@ -219,7 +340,7 @@ void RestoringSeriesPreservesHistory()
 void DisconnectDoesNotClearHistory()
 {
     var bluetooth = new FakeBluetoothSensorService();
-    var model = new MainPageModel(bluetooth);
+    var model = new MainPageModel(bluetooth, new FakeSensorLogService());
     model.AddChartReadingForTest(MakeReading());
 
     bluetooth.RaiseUnexpectedDisconnect();
@@ -230,7 +351,7 @@ void DisconnectDoesNotClearHistory()
 void ReconnectDoesNotDuplicateSubscriptions()
 {
     var bluetooth = new FakeBluetoothSensorService();
-    _ = new MainPageModel(bluetooth);
+    _ = new MainPageModel(bluetooth, new FakeSensorLogService());
 
     bluetooth.RaiseUnexpectedDisconnect();
 
@@ -255,8 +376,18 @@ void ChartCollectionsUseViewModelUpdatePath()
     Equal(true, model.Pm1SeriesReferenceMatches, "pm1 series reference");
 }
 
+async Task ManualLabelUiCommandRequestsSmoking()
+{
+    var bluetooth = new FakeBluetoothSensorService { CanSetManualLabel = true };
+    var model = new MainPageModel(bluetooth, new FakeSensorLogService());
+
+    await model.SetSmokingCommand.ExecuteAsync(null);
+
+    Equal(ManualLabelState.Smoking, bluetooth.LastRequestedManualLabel, "ui smoking command");
+}
+
 static MainPageModel CreateModel()
-    => new(new FakeBluetoothSensorService());
+    => new(new FakeBluetoothSensorService(), new FakeSensorLogService());
 
 static void AddManyReadings(MainPageModel model, int count)
 {
@@ -280,7 +411,9 @@ static SensorReading MakeReading(DateTimeOffset? timestamp = null, ushort sequen
         6.0,
         7.0,
         co2,
-        1.25);
+        1.25,
+        ManualLabelState.Smoking,
+        1);
 
 static byte[] MakePacket(
     ushort sequence = 1,
@@ -295,7 +428,7 @@ static byte[] MakePacket(
     ushort co2 = 700,
     ushort distanceRaw = 0)
 {
-    var packet = new byte[SensorPacketDecoder.PacketLength];
+    var packet = new byte[SensorPacketProtocol.PacketLength];
     WriteU16(packet, 0, sequence);
     WriteU16(packet, 2, pm1);
     WriteU16(packet, 4, pm25);
@@ -307,6 +440,21 @@ static byte[] MakePacket(
     WriteI16(packet, 16, voc);
     WriteU16(packet, 18, co2);
     WriteU16(packet, 20, distanceRaw);
+    packet[SensorPacketProtocol.ManualLabelOffset] = SensorPacketProtocol.ManualLabelSmokingRaw;
+    return packet;
+}
+
+static byte[] MakeLegacyPacket()
+{
+    var packet = new byte[22];
+    MakePacket().AsSpan(0, packet.Length).CopyTo(packet);
+    return packet;
+}
+
+static byte[] MakeManualPacket(byte rawLabel)
+{
+    var packet = MakePacket();
+    packet[SensorPacketProtocol.ManualLabelOffset] = rawLabel;
     return packet;
 }
 
@@ -386,6 +534,10 @@ internal sealed class FakeBluetoothSensorService : IBluetoothSensorService
 
     public DateTimeOffset? LastPacketTime { get; private set; }
 
+    public bool CanSetManualLabel { get; set; }
+
+    public ManualLabelState? LastRequestedManualLabel { get; private set; }
+
     public Task<IReadOnlyList<DiscoveredSensorDevice>> ScanAsync(string? filter, TimeSpan timeout, CancellationToken cancellationToken)
         => Task.FromResult<IReadOnlyList<DiscoveredSensorDevice>>([]);
 
@@ -410,6 +562,12 @@ internal sealed class FakeBluetoothSensorService : IBluetoothSensorService
         return Task.CompletedTask;
     }
 
+    public Task SetManualLabelAsync(ManualLabelState label, CancellationToken cancellationToken)
+    {
+        LastRequestedManualLabel = label;
+        return Task.CompletedTask;
+    }
+
     public ValueTask DisposeAsync()
         => ValueTask.CompletedTask;
 
@@ -429,4 +587,47 @@ internal sealed class FakeBluetoothSensorService : IBluetoothSensorService
 
     public void RaiseDiagnostic(string message)
         => DiagnosticMessage?.Invoke(this, message);
+}
+
+internal sealed class FakeSensorLogService : ISensorLogService
+{
+    public event EventHandler<string>? StatusChanged;
+
+    public bool IsLogging { get; private set; }
+
+    public string? CurrentLogName { get; private set; }
+
+    public string StatusText { get; private set; } = "Waiting for data";
+
+    public string LogFolderDisplayText { get; private set; } = "Not selected";
+
+    public Task StartSessionAsync(SensorReading firstReading, long connectionGeneration, CancellationToken cancellationToken = default)
+    {
+        IsLogging = true;
+        CurrentLogName = "Log0001.csv";
+        StatusText = "Logging: Log0001.csv";
+        StatusChanged?.Invoke(this, StatusText);
+        return Task.CompletedTask;
+    }
+
+    public Task AppendAsync(SensorReading reading, long connectionGeneration, CancellationToken cancellationToken = default)
+    {
+        if (!IsLogging)
+        {
+            return StartSessionAsync(reading, connectionGeneration, cancellationToken);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task<LogSaveResult> StopAndSaveAsync(LogStopReason reason, long connectionGeneration, CancellationToken cancellationToken = default)
+    {
+        IsLogging = false;
+        StatusText = CurrentLogName is null ? "Waiting for data" : $"Saved: {CurrentLogName}";
+        StatusChanged?.Invoke(this, StatusText);
+        return Task.FromResult(new LogSaveResult(CurrentLogName, null, CurrentLogName is not null, ErrorMessage: null));
+    }
+
+    public Task SelectPublicFolderAsync(CancellationToken cancellationToken = default)
+        => Task.CompletedTask;
 }

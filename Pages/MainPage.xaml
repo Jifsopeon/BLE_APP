@@ -29,8 +29,6 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <VerticalStackLayout Grid.Row="0" Spacing="4">
@@ -51,8 +49,150 @@
                 <Border.StrokeShape>
                     <RoundRectangle CornerRadius="6" />
                 </Border.StrokeShape>
+                <Grid RowSpacing="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid ColumnDefinitions="*,Auto"
+                          ColumnSpacing="12">
+                        <VerticalStackLayout Spacing="2">
+                            <Label Text="BLE Connection"
+                                   FontSize="18"
+                                   FontAttributes="Bold" />
+                            <Label Text="{Binding DeviceName}"
+                                   FontSize="13"
+                                   TextColor="{AppThemeBinding Light=#666666, Dark=#C8C8C8}" />
+                        </VerticalStackLayout>
+                        <Label Grid.Column="1"
+                               Text="{Binding ConnectionState}"
+                               FontSize="16"
+                               FontAttributes="Bold"
+                               HorizontalTextAlignment="End" />
+                    </Grid>
+
+                    <Grid Grid.Row="1"
+                          ColumnDefinitions="*,Auto,Auto"
+                          ColumnSpacing="10">
+                        <SearchBar Placeholder="Search devices"
+                                   Text="{Binding SearchText}"
+                                   HeightRequest="44" />
+                        <Button Grid.Column="1"
+                                Text="Scan"
+                                Command="{Binding ScanCommand}"
+                                HeightRequest="44" />
+                        <Button Grid.Column="2"
+                                Text="Cancel"
+                                Command="{Binding CancelScanCommand}"
+                                HeightRequest="44" />
+                    </Grid>
+
+                    <Grid Grid.Row="2"
+                          ColumnDefinitions="*,Auto,Auto"
+                          ColumnSpacing="10">
+                        <CollectionView ItemsSource="{Binding Devices}"
+                                        SelectedItem="{Binding SelectedDevice}"
+                                        SelectionMode="Single"
+                                        HeightRequest="150">
+                            <CollectionView.ItemTemplate>
+                                <DataTemplate x:DataType="models:DiscoveredSensorDevice">
+                                    <Grid Padding="8"
+                                          ColumnDefinitions="*,Auto"
+                                          RowDefinitions="Auto,Auto">
+                                        <Label Text="{Binding Name}"
+                                               FontAttributes="Bold" />
+                                        <Label Grid.Column="1"
+                                               Text="{Binding SignalStrengthDbm, StringFormat='{0} dBm'}" />
+                                        <Label Grid.Row="1"
+                                               Text="{Binding Id}"
+                                               FontSize="12"
+                                               TextColor="{AppThemeBinding Light=#666666, Dark=#C8C8C8}" />
+                                        <Label Grid.Row="1"
+                                               Grid.Column="1"
+                                               Text="IAQ"
+                                               IsVisible="{Binding AdvertisesExpectedService}"
+                                               FontSize="12" />
+                                    </Grid>
+                                </DataTemplate>
+                            </CollectionView.ItemTemplate>
+                        </CollectionView>
+
+                        <Button Grid.Column="1"
+                                Text="Connect"
+                                Command="{Binding ConnectCommand}"
+                                HeightRequest="44"
+                                VerticalOptions="Start" />
+                        <VerticalStackLayout Grid.Column="2"
+                                             Spacing="8">
+                            <Button Text="Disconnect"
+                                    Command="{Binding DisconnectCommand}"
+                                    HeightRequest="44" />
+                            <Button Text="Reconnect"
+                                    Command="{Binding ReconnectCommand}"
+                                    HeightRequest="44" />
+                        </VerticalStackLayout>
+                    </Grid>
+
+                    <Label Grid.Row="3"
+                           Text="{Binding ErrorText}"
+                           TextColor="#B3261E"
+                           LineBreakMode="WordWrap" />
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="2"
+                    Stroke="#2F3136"
+                    StrokeThickness="2"
+                    Padding="16"
+                    BackgroundColor="{AppThemeBinding Light=#FAFAFA, Dark=#202124}">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="6" />
+                </Border.StrokeShape>
+                <Grid ColumnDefinitions="*,Auto"
+                      ColumnSpacing="12"
+                      RowSpacing="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <VerticalStackLayout Spacing="2">
+                        <Label Text="Logging Folder"
+                               FontSize="18"
+                               FontAttributes="Bold" />
+                        <Label Text="{Binding LogFolderDisplayText}"
+                               FontSize="16"
+                               FontAttributes="Bold"
+                               LineBreakMode="MiddleTruncation" />
+                    </VerticalStackLayout>
+                    <Button Grid.Column="1"
+                            Text="Select Folder"
+                            Command="{Binding SelectLogFolderCommand}"
+                            HeightRequest="44"
+                            VerticalOptions="Center" />
+                    <Label Grid.Row="1"
+                           Grid.ColumnSpan="2"
+                           Text="{Binding LoggingStatusText}"
+                           FontSize="13"
+                           TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}"
+                           LineBreakMode="WordWrap" />
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="3"
+                    Stroke="#2F3136"
+                    StrokeThickness="2"
+                    Padding="16"
+                    BackgroundColor="{AppThemeBinding Light=#FAFAFA, Dark=#202124}">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="6" />
+                </Border.StrokeShape>
                 <Grid RowSpacing="14">
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
@@ -114,10 +254,72 @@
                             </DataTemplate>
                         </CollectionView.ItemTemplate>
                     </CollectionView>
+
+                    <FlexLayout Grid.Row="2"
+                                Wrap="Wrap"
+                                Direction="Row"
+                                AlignItems="Stretch"
+                                JustifyContent="Start"
+                                AlignContent="Stretch">
+                        <Border Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
+                                StrokeThickness="1"
+                                Padding="12"
+                                Margin="0,0,10,10"
+                                FlexLayout.Basis="320"
+                                FlexLayout.Grow="1"
+                                BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#151618}">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="6" />
+                            </Border.StrokeShape>
+                            <VerticalStackLayout Spacing="8">
+                                <Label Text="Set Manual Label"
+                                       FontSize="13"
+                                       TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
+                                <Label Text="{Binding ManualLabelPendingText}"
+                                       FontSize="12"
+                                       TextColor="{AppThemeBinding Light=#666666, Dark=#C8C8C8}" />
+                                <HorizontalStackLayout Spacing="8">
+                                    <Button Text="No Smoking"
+                                            Command="{Binding SetNoSmokingCommand}"
+                                            HeightRequest="40" />
+                                    <Button Text="Smoking"
+                                            Command="{Binding SetSmokingCommand}"
+                                            HeightRequest="40" />
+                                </HorizontalStackLayout>
+                                <Label Text="{Binding ManualLabelText, StringFormat='Confirmed: {0}'}"
+                                       FontSize="12"
+                                       TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
+                            </VerticalStackLayout>
+                        </Border>
+
+                        <Border Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
+                                StrokeThickness="1"
+                                Padding="12"
+                                Margin="0,0,10,10"
+                                FlexLayout.Basis="320"
+                                FlexLayout.Grow="1"
+                                BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#151618}">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="6" />
+                            </Border.StrokeShape>
+                            <VerticalStackLayout Spacing="8">
+                                <Label Text="Manual Label"
+                                       FontSize="13"
+                                       TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
+                                <Label Text="{Binding ManualLabelText}"
+                                       FontSize="24"
+                                       FontAttributes="Bold"
+                                       LineBreakMode="TailTruncation" />
+                                <Label Text=""
+                                       FontSize="12"
+                                       TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
+                            </VerticalStackLayout>
+                        </Border>
+                    </FlexLayout>
                 </Grid>
             </Border>
 
-            <Border Grid.Row="2"
+            <Border Grid.Row="4"
                     Stroke="#2F3136"
                     StrokeThickness="2"
                     Padding="16"
@@ -359,132 +561,6 @@
                 </Grid>
             </Border>
 
-            <Border Grid.Row="3"
-                    Stroke="#2F3136"
-                    StrokeThickness="2"
-                    Padding="16"
-                    BackgroundColor="{AppThemeBinding Light=#FAFAFA, Dark=#202124}">
-                <Border.StrokeShape>
-                    <RoundRectangle CornerRadius="6" />
-                </Border.StrokeShape>
-                <Grid RowSpacing="10">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-                    <Label Text="Live input"
-                           FontSize="18"
-                           FontAttributes="Bold" />
-                    <Grid Grid.Row="1"
-                          ColumnDefinitions="Auto,*,Auto"
-                          RowDefinitions="Auto,Auto"
-                          ColumnSpacing="12"
-                          RowSpacing="8">
-                        <Label Text="Device"
-                               FontAttributes="Bold" />
-                        <Label Grid.Column="1"
-                               Text="{Binding DeviceName}" />
-                        <Label Grid.Column="2"
-                               Text="{Binding ConnectionState}" />
-                        <Label Grid.Row="1"
-                               Text="Error"
-                               FontAttributes="Bold" />
-                        <Label Grid.Row="1"
-                               Grid.Column="1"
-                               Grid.ColumnSpan="2"
-                               Text="{Binding ErrorText}"
-                               TextColor="#B3261E"
-                               LineBreakMode="WordWrap" />
-                    </Grid>
-                </Grid>
-            </Border>
-
-            <Grid Grid.Row="4"
-                  ColumnDefinitions="*,Auto,Auto"
-                  ColumnSpacing="10">
-                <SearchBar Placeholder="Search devices"
-                           Text="{Binding SearchText}"
-                           HeightRequest="44" />
-                <Button Grid.Column="1"
-                        Text="Scan"
-                        Command="{Binding ScanCommand}"
-                        HeightRequest="44" />
-                <Button Grid.Column="2"
-                        Text="Cancel"
-                        Command="{Binding CancelScanCommand}"
-                        HeightRequest="44" />
-            </Grid>
-
-            <Grid Grid.Row="5"
-                  ColumnDefinitions="*,Auto,Auto"
-                  ColumnSpacing="10">
-                <CollectionView ItemsSource="{Binding Devices}"
-                                SelectedItem="{Binding SelectedDevice}"
-                                SelectionMode="Single"
-                                HeightRequest="150">
-                    <CollectionView.ItemTemplate>
-                        <DataTemplate x:DataType="models:DiscoveredSensorDevice">
-                            <Grid Padding="8"
-                                  ColumnDefinitions="*,Auto"
-                                  RowDefinitions="Auto,Auto">
-                                <Label Text="{Binding Name}"
-                                       FontAttributes="Bold" />
-                                <Label Grid.Column="1"
-                                       Text="{Binding SignalStrengthDbm, StringFormat='{0} dBm'}" />
-                                <Label Grid.Row="1"
-                                       Text="{Binding Id}"
-                                       FontSize="12"
-                                       TextColor="{AppThemeBinding Light=#666666, Dark=#C8C8C8}" />
-                                <Label Grid.Row="1"
-                                       Grid.Column="1"
-                                       Text="IAQ"
-                                       IsVisible="{Binding AdvertisesExpectedService}"
-                                       FontSize="12" />
-                            </Grid>
-                        </DataTemplate>
-                    </CollectionView.ItemTemplate>
-                </CollectionView>
-
-                <Button Grid.Column="1"
-                        Text="Connect"
-                        Command="{Binding ConnectCommand}"
-                        HeightRequest="44"
-                        VerticalOptions="Start" />
-                <VerticalStackLayout Grid.Column="2"
-                                     Spacing="8">
-                    <Button Text="Disconnect"
-                            Command="{Binding DisconnectCommand}"
-                            HeightRequest="44" />
-                    <Button Text="Reconnect"
-                            Command="{Binding ReconnectCommand}"
-                            HeightRequest="44" />
-                </VerticalStackLayout>
-            </Grid>
-
-            <Border Grid.Row="6"
-                    Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
-                    StrokeThickness="1"
-                    Padding="12"
-                    BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#151618}">
-                <Border.StrokeShape>
-                    <RoundRectangle CornerRadius="6" />
-                </Border.StrokeShape>
-                <VerticalStackLayout Spacing="8">
-                    <Label Text="Diagnostics"
-                           FontAttributes="Bold" />
-                    <CollectionView ItemsSource="{Binding Diagnostics}"
-                                    SelectionMode="None"
-                                    HeightRequest="180">
-                        <CollectionView.ItemTemplate>
-                            <DataTemplate x:DataType="x:String">
-                                <Label Text="{Binding .}"
-                                       FontSize="12"
-                                       LineBreakMode="WordWrap" />
-                            </DataTemplate>
-                        </CollectionView.ItemTemplate>
-                    </CollectionView>
-                </VerticalStackLayout>
-            </Border>
         </Grid>
     </ScrollView>
 </ContentPage>

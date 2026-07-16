@@ -20,6 +20,7 @@ public sealed partial class MainPageModel : ObservableObject
     private const string ExpectedDeviceName = "PSE84-IAQ";
 
     private readonly IBluetoothSensorService _bluetooth;
+    private readonly ISensorLogService _sensorLog;
     private readonly int _instanceId;
     private readonly LineSeries<ObservablePoint> _pm1Series;
     private readonly LineSeries<ObservablePoint> _pm25Series;
@@ -35,6 +36,8 @@ public sealed partial class MainPageModel : ObservableObject
     private DateTimeOffset _lastUiReadingUpdate = DateTimeOffset.MinValue;
     private DateTimeOffset? _chartStartTimestamp;
     private ulong _readingReceivedCount;
+    private ManualLabelState? _pendingManualLabel;
+    private CancellationTokenSource? _manualLabelConfirmationCts;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ConnectCommand))]
@@ -54,6 +57,23 @@ public sealed partial class MainPageModel : ObservableObject
 
     [ObservableProperty]
     private string _packetText = "Packets: 0";
+
+    [ObservableProperty]
+    private string _manualLabelText = "Waiting";
+
+    [ObservableProperty]
+    private string _manualLabelPendingText = string.Empty;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SetSmokingCommand))]
+    [NotifyCanExecuteChangedFor(nameof(SetNoSmokingCommand))]
+    private bool _isManualLabelCommandPending;
+
+    [ObservableProperty]
+    private string _loggingStatusText = "Logging disabled: select a valid log folder.";
+
+    [ObservableProperty]
+    private string _logFolderDisplayText = "Not selected";
 
     [ObservableProperty]
     private string _errorText = string.Empty;
@@ -88,15 +108,18 @@ public sealed partial class MainPageModel : ObservableObject
     [ObservableProperty]
     private bool _isNoxVisible = true;
 
-    public MainPageModel(IBluetoothSensorService bluetooth)
+    public MainPageModel(IBluetoothSensorService bluetooth, ISensorLogService sensorLog)
     {
         _bluetooth = bluetooth;
+        _sensorLog = sensorLog;
         _instanceId = RuntimeHelpers.GetHashCode(this);
         Debug.WriteLine($"[CHART] MainViewModel constructed InstanceId={_instanceId}");
         _bluetooth.DeviceDiscovered += OnDeviceDiscovered;
         _bluetooth.ReadingReceived += OnReadingReceived;
-        _bluetooth.DiagnosticMessage += OnDiagnosticMessage;
         _bluetooth.UnexpectedlyDisconnected += OnUnexpectedlyDisconnected;
+        _sensorLog.StatusChanged += OnLogStatusChanged;
+        LoggingStatusText = _sensorLog.StatusText;
+        LogFolderDisplayText = _sensorLog.LogFolderDisplayText;
 
         Metrics =
         [
@@ -135,8 +158,6 @@ public sealed partial class MainPageModel : ObservableObject
     public ObservableCollection<DiscoveredSensorDevice> Devices { get; } = [];
 
     public ObservableCollection<SensorMetric> Metrics { get; }
-
-    public ObservableCollection<string> Diagnostics { get; } = [];
 
     public ObservableCollection<ObservablePoint> Pm1Values { get; } = [];
 
@@ -194,6 +215,8 @@ public sealed partial class MainPageModel : ObservableObject
 
     public bool CanScan => !IsBusy && !IsScanning;
 
+    public bool CanSetManualLabel => _bluetooth.CanSetManualLabel && !IsBusy && !IsManualLabelCommandPending;
+
     public bool Pm1ValuesReferenceMatches => ReferenceEquals(_pm1Series.Values, Pm1Values);
 
     public bool Pm1SeriesReferenceMatches => ReferenceEquals(PmSeries[0], _pm1Series);
@@ -209,6 +232,13 @@ public sealed partial class MainPageModel : ObservableObject
         ConnectCommand.NotifyCanExecuteChanged();
         DisconnectCommand.NotifyCanExecuteChanged();
         ReconnectCommand.NotifyCanExecuteChanged();
+        SetSmokingCommand.NotifyCanExecuteChanged();
+        SetNoSmokingCommand.NotifyCanExecuteChanged();
+    }
+
+    partial void OnIsManualLabelCommandPendingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanSetManualLabel));
     }
 
     partial void OnIsPm1VisibleChanged(bool value) => SetSeriesVisibility(_pm1Series, value);
@@ -299,6 +329,7 @@ public sealed partial class MainPageModel : ObservableObject
         _connectionCts?.Dispose();
         _connectionCts = new CancellationTokenSource();
         _scanCts?.Cancel();
+        ClearManualLabelPending();
 
         try
         {
@@ -330,6 +361,7 @@ public sealed partial class MainPageModel : ObservableObject
             IsBusy = true;
             _connectionCts?.Cancel();
             await _bluetooth.DisconnectAsync(userInitiated: true, CancellationToken.None);
+            ClearManualLabelPending();
             UpdateState(BluetoothConnectionState.Disconnected);
         }
         catch (Exception ex)
@@ -349,6 +381,7 @@ public sealed partial class MainPageModel : ObservableObject
         _connectionCts?.Cancel();
         _connectionCts?.Dispose();
         _connectionCts = new CancellationTokenSource();
+        ClearManualLabelPending();
 
         try
         {
@@ -365,6 +398,29 @@ public sealed partial class MainPageModel : ObservableObject
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanSetManualLabel))]
+    private Task SetSmoking()
+        => SetManualLabel(ManualLabelState.Smoking);
+
+    [RelayCommand(CanExecute = nameof(CanSetManualLabel))]
+    private Task SetNoSmoking()
+        => SetManualLabel(ManualLabelState.NoSmoking);
+
+    [RelayCommand]
+    private async Task SelectLogFolder()
+    {
+        try
+        {
+            await _sensorLog.SelectPublicFolderAsync(CancellationToken.None);
+            LoggingStatusText = _sensorLog.StatusText;
+            LogFolderDisplayText = _sensorLog.LogFolderDisplayText;
+        }
+        catch (Exception ex)
+        {
+            ErrorText = $"Log folder setup failed: {ex.Message}";
         }
     }
 
@@ -438,7 +494,64 @@ public sealed partial class MainPageModel : ObservableObject
             SetMetric("VOC", Format(reading.Voc, "0.0"));
             SetMetric("CO2", reading.Co2?.ToString() ?? "--");
             SetMetric("Distance", reading.DistanceMetres.ToString("0.###"));
+            UpdateManualLabel(reading.ManualLabel);
         });
+    }
+
+    private async Task SetManualLabel(ManualLabelState requestedLabel)
+    {
+        _manualLabelConfirmationCts?.Cancel();
+        _manualLabelConfirmationCts?.Dispose();
+        _manualLabelConfirmationCts = new CancellationTokenSource();
+
+        try
+        {
+            IsManualLabelCommandPending = true;
+            _pendingManualLabel = requestedLabel;
+            ManualLabelPendingText = $"Pending: {SensorPacketProtocol.FormatManualLabel(requestedLabel)}";
+            await _bluetooth.SetManualLabelAsync(requestedLabel, _manualLabelConfirmationCts.Token);
+            _ = WatchManualLabelConfirmationAsync(requestedLabel, _manualLabelConfirmationCts.Token);
+        }
+        catch (Exception ex)
+        {
+            IsManualLabelCommandPending = false;
+            _pendingManualLabel = null;
+            ManualLabelPendingText = string.Empty;
+            ErrorText = $"Manual label command failed: {ex.Message}";
+        }
+    }
+
+    private async Task WatchManualLabelConfirmationAsync(ManualLabelState requestedLabel, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            if (_pendingManualLabel == requestedLabel)
+            {
+                MainThread.BeginInvokeOnMainThread(() =>
+                {
+                    IsManualLabelCommandPending = false;
+                    _pendingManualLabel = null;
+                    ManualLabelPendingText = string.Empty;
+                    ErrorText = $"Manual label confirmation timed out for {SensorPacketProtocol.FormatManualLabel(requestedLabel)}.";
+                });
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void UpdateManualLabel(ManualLabelState reportedLabel)
+    {
+        ManualLabelText = SensorPacketProtocol.FormatManualLabel(reportedLabel);
+        if (_pendingManualLabel == reportedLabel)
+        {
+            _manualLabelConfirmationCts?.Cancel();
+            IsManualLabelCommandPending = false;
+            _pendingManualLabel = null;
+            ManualLabelPendingText = string.Empty;
+        }
     }
 
     private void AddChartReading(SensorReading reading)
@@ -471,17 +584,11 @@ public sealed partial class MainPageModel : ObservableObject
         }
     }
 
-    private void OnDiagnosticMessage(object? sender, string message)
+    private void OnLogStatusChanged(object? sender, string status)
         => MainThread.BeginInvokeOnMainThread(() =>
         {
-            Diagnostics.Insert(0, message);
-            while (Diagnostics.Count > 12)
-            {
-                Diagnostics.RemoveAt(Diagnostics.Count - 1);
-            }
-
-            UpdateState(_bluetooth.State);
-            PacketText = $"Packets: {_bluetooth.TotalPacketsReceived}  Malformed: {_bluetooth.MalformedPacketsReceived}  Gaps: {_bluetooth.SequenceGapsDetected}";
+            LoggingStatusText = status;
+            LogFolderDisplayText = _sensorLog.LogFolderDisplayText;
         });
 
     private async void OnUnexpectedlyDisconnected(object? sender, EventArgs e)
@@ -489,6 +596,7 @@ public sealed partial class MainPageModel : ObservableObject
         MainThread.BeginInvokeOnMainThread(() =>
         {
             ErrorText = "Device disconnected unexpectedly. Reconnect will retry automatically.";
+            ClearManualLabelPending();
             UpdateState(BluetoothConnectionState.Disconnected);
         });
 
@@ -527,6 +635,22 @@ public sealed partial class MainPageModel : ObservableObject
     {
         ConnectionState = state;
         StatusText = state.ToString();
+        if (state is BluetoothConnectionState.Disconnected or BluetoothConnectionState.Idle or BluetoothConnectionState.Error)
+        {
+            ClearManualLabelPending();
+        }
+
+        OnPropertyChanged(nameof(CanSetManualLabel));
+        SetSmokingCommand.NotifyCanExecuteChanged();
+        SetNoSmokingCommand.NotifyCanExecuteChanged();
+    }
+
+    private void ClearManualLabelPending()
+    {
+        _manualLabelConfirmationCts?.Cancel();
+        IsManualLabelCommandPending = false;
+        _pendingManualLabel = null;
+        ManualLabelPendingText = string.Empty;
     }
 
     private void SetMetric(string name, string value)

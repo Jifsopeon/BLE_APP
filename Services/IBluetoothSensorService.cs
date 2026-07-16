@@ -24,6 +24,8 @@ public interface IBluetoothSensorService : IAsyncDisposable
 
     DateTimeOffset? LastPacketTime { get; }
 
+    bool CanSetManualLabel { get; }
+
     Task<IReadOnlyList<DiscoveredSensorDevice>> ScanAsync(string? filter, TimeSpan timeout, CancellationToken cancellationToken);
 
     Task StopScanAsync(CancellationToken cancellationToken);
@@ -33,4 +35,6 @@ public interface IBluetoothSensorService : IAsyncDisposable
     Task DisconnectAsync(bool userInitiated, CancellationToken cancellationToken);
 
     Task ReconnectAsync(CancellationToken cancellationToken);
+
+    Task SetManualLabelAsync(ManualLabelState label, CancellationToken cancellationToken);
 }

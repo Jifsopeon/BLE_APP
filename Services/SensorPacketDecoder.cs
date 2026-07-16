@@ -5,13 +5,14 @@ namespace BLE_APP.Services;
 
 public sealed class SensorPacketDecoder
 {
-    public const int PacketLength = 22;
+    public const int PacketLength = SensorPacketProtocol.PacketLength;
 
     public SensorReading Decode(ReadOnlySpan<byte> payload)
     {
-        if (payload.Length != PacketLength)
+        if (payload.Length != SensorPacketProtocol.PacketLength)
         {
-            throw new SensorPacketFormatException($"Expected {PacketLength} bytes, received {payload.Length}.");
+            throw new SensorPacketFormatException(
+                $"Incompatible firmware packet: expected {SensorPacketProtocol.PacketLength} bytes including Manual label, received {payload.Length} bytes.");
         }
 
         ushort sequence = BinaryPrimitives.ReadUInt16LittleEndian(payload[0..2]);
@@ -25,6 +26,12 @@ public sealed class SensorPacketDecoder
         short voc = BinaryPrimitives.ReadInt16LittleEndian(payload[16..18]);
         ushort co2 = BinaryPrimitives.ReadUInt16LittleEndian(payload[18..20]);
         ushort distanceRaw = BinaryPrimitives.ReadUInt16LittleEndian(payload[20..22]);
+        byte manualLabelRaw = payload[SensorPacketProtocol.ManualLabelOffset];
+        if (!SensorPacketProtocol.TryDecodeManualLabel(manualLabelRaw, out var manualLabel))
+        {
+            throw new SensorPacketFormatException(
+                $"Unsupported Manual label raw value {manualLabelRaw} in {payload.Length}-byte packet.");
+        }
 
         return new SensorReading(
             DateTimeOffset.Now,
@@ -38,7 +45,9 @@ public sealed class SensorPacketDecoder
             ScaleSignedTenths(nox),
             ScaleSignedTenths(voc),
             co2 == 0xFFFF ? null : co2,
-            distanceRaw / 1000.0);
+            distanceRaw / 1000.0,
+            manualLabel,
+            manualLabelRaw);
     }
 
     private static double? ScaleUnsignedTenths(ushort value)

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using BLE_APP.Services;
 using Bluetooth.Maui;
 using CommunityToolkit.Maui;
@@ -12,6 +13,10 @@ namespace BLE_APP
 {
     public static class MauiProgram
     {
+#if DEBUG && WINDOWS
+        private static bool s_firstChanceDiagnosticsAttached;
+#endif
+
         public static MauiApp CreateMauiApp()
         {
 #if ANDROID
@@ -19,6 +24,9 @@ namespace BLE_APP
 #endif
 #if DEBUG
             StartupDiagnostics.Reset();
+#if WINDOWS
+            AttachWindowsFirstChanceDiagnostics();
+#endif
 #endif
             var builder = MauiApp.CreateBuilder();
             builder
@@ -49,6 +57,7 @@ namespace BLE_APP
 
             builder.Services.AddBluetoothServices();
             builder.Services.AddSingleton<SensorPacketDecoder>();
+            builder.Services.AddSingleton<ISensorLogService, SensorLogService>();
             builder.Services.AddSingleton<IBluetoothSensorService, BluetoothSensorService>();
             builder.Services.AddSingleton<MainPageModel>();
 
@@ -67,6 +76,27 @@ namespace BLE_APP
         }
 
 #if DEBUG
+#if WINDOWS
+        private static void AttachWindowsFirstChanceDiagnostics()
+        {
+            if (s_firstChanceDiagnosticsAttached)
+            {
+                return;
+            }
+
+            s_firstChanceDiagnosticsAttached = true;
+            AppDomain.CurrentDomain.FirstChanceException += OnFirstChanceException;
+        }
+
+        private static void OnFirstChanceException(object? sender, FirstChanceExceptionEventArgs args)
+        {
+            if (args.Exception is PlatformNotSupportedException)
+            {
+                Debug.WriteLine($"[FIRST-CHANCE] PlatformNotSupportedException: {args.Exception}");
+            }
+        }
+#endif
+
         private static void VerifyLiveChartsRenderModeHandler(MauiApp app)
         {
             var handlers = app.Services.GetRequiredService<IMauiHandlersFactory>();
