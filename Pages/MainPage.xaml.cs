@@ -10,6 +10,11 @@ namespace BLE_APP.Pages
 {
     public partial class MainPage : ContentPage
     {
+        private const double NarrowLayoutBreakpoint = 760;
+        private const double SingleMetricColumnBreakpoint = 390;
+        private ResponsiveLayoutMode? _activeLayoutMode;
+        private int _activeMetricSpan;
+
         public MainPage(MainPageModel model)
         {
 #if ANDROID
@@ -32,8 +37,7 @@ namespace BLE_APP.Pages
 
         private void OnSizeChanged(object? sender, EventArgs e)
         {
-            Debug.WriteLine($"[CHART] MainPage size width={Width:0.#} height={Height:0.#}");
-            Debug.WriteLine($"[CHART] Graph panel measured width={GraphPanel.Width:0.#} height={GraphPanel.Height:0.#} visible={GraphPanel.IsVisible}");
+            ApplyResponsiveLayout(Width);
         }
 
         private void OnLoaded(object? sender, EventArgs e)
@@ -42,8 +46,174 @@ namespace BLE_APP.Pages
             Debug.WriteLine("[ANDROID-STARTUP] MainPage Loaded");
 #endif
             Debug.WriteLine("[STARTUP] MainPage Loaded entered");
+            ApplyResponsiveLayout(Width);
             Debug.WriteLine($"[CHART] Graph panel measured width={GraphPanel.Width:0.#} height={GraphPanel.Height:0.#} visible={GraphPanel.IsVisible}");
             Debug.WriteLine("[STARTUP] MainPage Loaded completed");
+        }
+
+        private void ApplyResponsiveLayout(double pageWidth)
+        {
+            if (pageWidth <= 0)
+            {
+                return;
+            }
+
+            var mode = pageWidth < NarrowLayoutBreakpoint
+                ? ResponsiveLayoutMode.Narrow
+                : ResponsiveLayoutMode.Wide;
+            var metricSpan = mode == ResponsiveLayoutMode.Wide
+                ? 3
+                : pageWidth < SingleMetricColumnBreakpoint ? 1 : 2;
+
+            if (_activeLayoutMode == mode && _activeMetricSpan == metricSpan)
+            {
+                return;
+            }
+
+            _activeLayoutMode = mode;
+            _activeMetricSpan = metricSpan;
+            MetricItemsLayout.Span = metricSpan;
+
+            if (mode == ResponsiveLayoutMode.Narrow)
+            {
+                ApplyNarrowLayout();
+            }
+            else
+            {
+                ApplyWideLayout();
+            }
+
+            Debug.WriteLine($"[LAYOUT] mode={mode} width={pageWidth:0.#} metricSpan={metricSpan}");
+        }
+
+        private void ApplyNarrowLayout()
+        {
+            PageGrid.Padding = new Thickness(12);
+
+            SetRows(BleHeaderGrid, GridLength.Auto, GridLength.Auto);
+            SetColumns(BleHeaderGrid, GridLength.Star);
+            Grid.SetRow(ConnectionStateLabel, 1);
+            Grid.SetColumn(ConnectionStateLabel, 0);
+            ConnectionStateLabel.HorizontalTextAlignment = TextAlignment.Start;
+
+            SetRows(BleSearchGrid, GridLength.Auto, GridLength.Auto, GridLength.Auto);
+            SetColumns(BleSearchGrid, GridLength.Star);
+            Grid.SetRow(SearchDevicesBar, 0);
+            Grid.SetColumn(SearchDevicesBar, 0);
+            Grid.SetRow(ScanButton, 1);
+            Grid.SetColumn(ScanButton, 0);
+            Grid.SetRow(CancelScanButton, 2);
+            Grid.SetColumn(CancelScanButton, 0);
+
+            SetRows(BleDeviceGrid, GridLength.Auto, GridLength.Auto, GridLength.Auto);
+            SetColumns(BleDeviceGrid, GridLength.Star);
+            Grid.SetRow(DeviceList, 0);
+            Grid.SetColumn(DeviceList, 0);
+            Grid.SetRow(ConnectButton, 1);
+            Grid.SetColumn(ConnectButton, 0);
+            Grid.SetRow(DisconnectButtonStack, 2);
+            Grid.SetColumn(DisconnectButtonStack, 0);
+
+            SetRows(LoggingSectionGrid, GridLength.Auto, GridLength.Auto, GridLength.Auto);
+            SetColumns(LoggingSectionGrid, GridLength.Star);
+            Grid.SetRow(SelectFolderButton, 1);
+            Grid.SetColumn(SelectFolderButton, 0);
+            Grid.SetRowSpan(SelectFolderButton, 1);
+            var loggingStatus = (View)LoggingSectionGrid.Children[2];
+            Grid.SetRowSpan(loggingStatus, 1);
+            Grid.SetRow(loggingStatus, 2);
+            Grid.SetColumn(loggingStatus, 0);
+            Grid.SetColumnSpan(loggingStatus, 1);
+
+            SetRows(ChartGrid, GridLength.Auto, GridLength.Auto, GridLength.Auto, GridLength.Auto, GridLength.Auto);
+            SetColumns(ChartGrid, GridLength.Star);
+            PlaceChart(PmChartCard, 0, 0);
+            PlaceChart(VocNoxChartCard, 1, 0);
+            PlaceChart(HumidityChartCard, 2, 0);
+            PlaceChart(TemperatureChartCard, 3, 0);
+            PlaceChart(Co2ChartCard, 4, 0);
+            SetChartHeight(300);
+        }
+
+        private void ApplyWideLayout()
+        {
+            PageGrid.Padding = new Thickness(24);
+
+            SetRows(BleHeaderGrid, GridLength.Auto);
+            SetColumns(BleHeaderGrid, GridLength.Star, GridLength.Auto);
+            Grid.SetRow(ConnectionStateLabel, 0);
+            Grid.SetColumn(ConnectionStateLabel, 1);
+            ConnectionStateLabel.HorizontalTextAlignment = TextAlignment.End;
+
+            SetRows(BleSearchGrid, GridLength.Auto);
+            SetColumns(BleSearchGrid, GridLength.Star, GridLength.Auto, GridLength.Auto);
+            Grid.SetRow(SearchDevicesBar, 0);
+            Grid.SetColumn(SearchDevicesBar, 0);
+            Grid.SetRow(ScanButton, 0);
+            Grid.SetColumn(ScanButton, 1);
+            Grid.SetRow(CancelScanButton, 0);
+            Grid.SetColumn(CancelScanButton, 2);
+
+            SetRows(BleDeviceGrid, GridLength.Auto);
+            SetColumns(BleDeviceGrid, GridLength.Star, GridLength.Auto, GridLength.Auto);
+            Grid.SetRow(DeviceList, 0);
+            Grid.SetColumn(DeviceList, 0);
+            Grid.SetRow(ConnectButton, 0);
+            Grid.SetColumn(ConnectButton, 1);
+            Grid.SetRow(DisconnectButtonStack, 0);
+            Grid.SetColumn(DisconnectButtonStack, 2);
+
+            SetRows(LoggingSectionGrid, GridLength.Auto, GridLength.Auto);
+            SetColumns(LoggingSectionGrid, GridLength.Star, GridLength.Auto);
+            Grid.SetRow(SelectFolderButton, 0);
+            Grid.SetColumn(SelectFolderButton, 1);
+            var loggingStatus = (View)LoggingSectionGrid.Children[2];
+            Grid.SetRow(loggingStatus, 1);
+            Grid.SetColumn(loggingStatus, 0);
+            Grid.SetColumnSpan(loggingStatus, 2);
+
+            SetRows(ChartGrid, GridLength.Auto, GridLength.Auto, GridLength.Auto);
+            SetColumns(ChartGrid, GridLength.Star, GridLength.Star);
+            PlaceChart(PmChartCard, 0, 0);
+            PlaceChart(VocNoxChartCard, 0, 1);
+            PlaceChart(HumidityChartCard, 1, 0);
+            PlaceChart(TemperatureChartCard, 1, 1);
+            PlaceChart(Co2ChartCard, 2, 0);
+            SetChartHeight(250);
+        }
+
+        private static void SetRows(Grid grid, params GridLength[] heights)
+        {
+            grid.RowDefinitions.Clear();
+            foreach (var height in heights)
+            {
+                grid.RowDefinitions.Add(new RowDefinition(height));
+            }
+        }
+
+        private static void SetColumns(Grid grid, params GridLength[] widths)
+        {
+            grid.ColumnDefinitions.Clear();
+            foreach (var width in widths)
+            {
+                grid.ColumnDefinitions.Add(new ColumnDefinition(width));
+            }
+        }
+
+        private static void PlaceChart(View chartCard, int row, int column)
+        {
+            Grid.SetRow(chartCard, row);
+            Grid.SetColumn(chartCard, column);
+        }
+
+        private void SetChartHeight(double height)
+        {
+            foreach (var chart in new[] { PmChart, VocNoxChart, HumidityChart, TemperatureChart, Co2Chart })
+            {
+                chart.MinimumHeightRequest = height;
+                chart.HeightRequest = height;
+                chart.HorizontalOptions = LayoutOptions.Fill;
+            }
         }
 
         private void OnLiveChartHandlerChanged(object? sender, EventArgs e)
@@ -199,5 +369,11 @@ namespace BLE_APP.Pages
 
         private static bool ShouldLogLiveChartCount(int count)
             => count is 1 or 2 or 5 or 10 or 50 or 100;
+
+        private enum ResponsiveLayoutMode
+        {
+            Narrow,
+            Wide
+        }
     }
 }

@@ -27,20 +27,20 @@ public static partial class SensorLogStorage
             throw new InvalidOperationException("Logging disabled: select a valid log folder.");
         }
 
-        var logDirectoryUri = AndroidDocumentTree.GetOrCreateDirectory(treeUri, LogDirectoryName);
-        if (logDirectoryUri is null)
+        var destinationUri = AndroidDocumentTree.GetRootDocumentUri(treeUri);
+        if (destinationUri is null)
         {
             throw new InvalidOperationException("Logging disabled: select a valid log folder.");
         }
 
-        var existing = AndroidDocumentTree.ListChildFileNames(treeUri, logDirectoryUri)
+        var existing = AndroidDocumentTree.ListChildFileNames(treeUri, destinationUri)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var fileName = SensorLogFileNameAllocator.AllocateNextFileName(existing);
         Uri? documentUri;
         var attempts = 0;
         do
         {
-            documentUri = AndroidDocumentTree.CreateDocument(logDirectoryUri, "text/csv", fileName);
+            documentUri = AndroidDocumentTree.CreateDocument(destinationUri, "text/csv", fileName);
             if (documentUri is null)
             {
                 existing.Add(fileName);
@@ -97,7 +97,7 @@ internal static class AndroidDocumentTree
         DocumentsContract.Document.ColumnMimeType
     ];
 
-    public static Uri? GetOrCreateDirectory(Uri treeUri, string directoryName)
+    public static Uri? GetRootDocumentUri(Uri treeUri)
     {
         var rootId = DocumentsContract.GetTreeDocumentId(treeUri);
         if (string.IsNullOrWhiteSpace(rootId) || Application.Context.ContentResolver is null)
@@ -105,14 +105,7 @@ internal static class AndroidDocumentTree
             return null;
         }
 
-        var rootDocumentUri = DocumentsContract.BuildDocumentUriUsingTree(treeUri, rootId);
-        if (rootDocumentUri is null)
-        {
-            return null;
-        }
-
-        var existing = FindChild(treeUri, rootId, directoryName, DocumentsContract.Document.MimeTypeDir);
-        return existing ?? DocumentsContract.CreateDocument(Application.Context.ContentResolver, rootDocumentUri, DocumentsContract.Document.MimeTypeDir, directoryName);
+        return DocumentsContract.BuildDocumentUriUsingTree(treeUri, rootId);
     }
 
     public static IEnumerable<string> ListChildFileNames(Uri treeUri, Uri directoryUri)
@@ -178,41 +171,6 @@ internal static class AndroidDocumentTree
         return cursor is not null && cursor.MoveToFirst()
             ? cursor.GetString(0)
             : null;
-    }
-
-    private static Uri? FindChild(Uri treeUri, string parentDocumentId, string displayName, string mimeType)
-    {
-        var childrenUri = DocumentsContract.BuildChildDocumentsUriUsingTree(treeUri, parentDocumentId);
-        if (childrenUri is null || Application.Context.ContentResolver is null)
-        {
-            return null;
-        }
-
-        using var cursor = Application.Context.ContentResolver?.Query(
-            childrenUri,
-            ChildProjection,
-            null,
-            null,
-            null);
-
-        if (cursor is null)
-        {
-            return null;
-        }
-
-        while (cursor.MoveToNext())
-        {
-            var documentId = cursor.GetString(0);
-            var childName = cursor.GetString(1);
-            var childMimeType = cursor.GetString(2);
-            if (string.Equals(childName, displayName, StringComparison.Ordinal) &&
-                string.Equals(childMimeType, mimeType, StringComparison.Ordinal))
-            {
-                return DocumentsContract.BuildDocumentUriUsingTree(treeUri, documentId);
-            }
-        }
-
-        return null;
     }
 }
 

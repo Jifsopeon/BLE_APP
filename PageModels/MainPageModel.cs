@@ -16,8 +16,19 @@ namespace BLE_APP.PageModels;
 
 public sealed partial class MainPageModel : ObservableObject
 {
-    public const int ChartMaximumPoints = 300;
+    public const double ChartWindowSeconds = 300.0;
+    public const int ChartMaximumPoints = 1000;
+    public const int ManualLabelConfirmationTimeoutSeconds = 12;
     private const string ExpectedDeviceName = "PSE84-IAQ";
+    private static readonly SKColor Pm1Color = SKColors.DodgerBlue;
+    private static readonly SKColor Pm25Color = SKColors.SeaGreen;
+    private static readonly SKColor Pm4Color = SKColors.DarkOrange;
+    private static readonly SKColor Pm10Color = SKColors.Crimson;
+    private static readonly SKColor VocColor = SKColors.MediumPurple;
+    private static readonly SKColor NoxColor = SKColors.Teal;
+    private static readonly SKColor HumidityColor = SKColors.RoyalBlue;
+    private static readonly SKColor TemperatureColor = SKColors.OrangeRed;
+    private static readonly SKColor Co2Color = SKColors.ForestGreen;
 
     private readonly IBluetoothSensorService _bluetooth;
     private readonly ISensorLogService _sensorLog;
@@ -135,15 +146,15 @@ public sealed partial class MainPageModel : ObservableObject
             new SensorMetric("Distance", "m")
         ];
 
-        _pm1Series = CreateSeries("PM1.0", Pm1Values, SKColors.DodgerBlue);
-        _pm25Series = CreateSeries("PM2.5", Pm25Values, SKColors.SeaGreen);
-        _pm4Series = CreateSeries("PM4.0", Pm4Values, SKColors.DarkOrange);
-        _pm10Series = CreateSeries("PM10.0", Pm10Values, SKColors.Crimson);
-        _vocSeries = CreateSeries("VOC", VocValues, SKColors.MediumPurple);
-        _noxSeries = CreateSeries("NOx", NoxValues, SKColors.Teal);
-        _humiditySeries = CreateSeries("Humidity", HumidityValues, SKColors.RoyalBlue);
-        _temperatureSeries = CreateSeries("Temperature", TemperatureValues, SKColors.OrangeRed);
-        _co2Series = CreateSeries("CO2", Co2Values, SKColors.ForestGreen);
+        _pm1Series = CreateSeries("PM1.0", Pm1Values, Pm1Color);
+        _pm25Series = CreateSeries("PM2.5", Pm25Values, Pm25Color);
+        _pm4Series = CreateSeries("PM4.0", Pm4Values, Pm4Color);
+        _pm10Series = CreateSeries("PM10.0", Pm10Values, Pm10Color);
+        _vocSeries = CreateSeries("VOC", VocValues, VocColor);
+        _noxSeries = CreateSeries("NOx", NoxValues, NoxColor);
+        _humiditySeries = CreateSeries("Humidity", HumidityValues, HumidityColor);
+        _temperatureSeries = CreateSeries("Temperature", TemperatureValues, TemperatureColor);
+        _co2Series = CreateSeries("CO2", Co2Values, Co2Color);
 
         PmSeries = [_pm1Series, _pm25Series, _pm4Series, _pm10Series];
         VocNoxSeries = [_vocSeries, _noxSeries];
@@ -221,9 +232,32 @@ public sealed partial class MainPageModel : ObservableObject
 
     public bool Pm1SeriesReferenceMatches => ReferenceEquals(PmSeries[0], _pm1Series);
 
+    public string Pm1SeriesColor => ToHex(Pm1Color);
+
+    public string Pm25SeriesColor => ToHex(Pm25Color);
+
+    public string Pm4SeriesColor => ToHex(Pm4Color);
+
+    public string Pm10SeriesColor => ToHex(Pm10Color);
+
+    public string VocSeriesColor => ToHex(VocColor);
+
+    public string NoxSeriesColor => ToHex(NoxColor);
+
+    public string HumiditySeriesColor => ToHex(HumidityColor);
+
+    public string TemperatureSeriesColor => ToHex(TemperatureColor);
+
+    public string Co2SeriesColor => ToHex(Co2Color);
+
     partial void OnHasReadingChanged(bool value)
     {
         OnPropertyChanged(nameof(IsWaitingForReading));
+    }
+
+    partial void OnSearchTextChanged(string value)
+    {
+        ReorderDevicesPreservingSelection();
     }
 
     partial void OnIsBusyChanged(bool value)
@@ -330,6 +364,7 @@ public sealed partial class MainPageModel : ObservableObject
         _connectionCts = new CancellationTokenSource();
         _scanCts?.Cancel();
         ClearManualLabelPending();
+        ResetChartSession();
 
         try
         {
@@ -382,6 +417,7 @@ public sealed partial class MainPageModel : ObservableObject
         _connectionCts?.Dispose();
         _connectionCts = new CancellationTokenSource();
         ClearManualLabelPending();
+        ResetChartSession();
 
         try
         {
@@ -408,6 +444,24 @@ public sealed partial class MainPageModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanSetManualLabel))]
     private Task SetNoSmoking()
         => SetManualLabel(ManualLabelState.NoSmoking);
+
+    [RelayCommand]
+    private void TogglePm1() => IsPm1Visible = !IsPm1Visible;
+
+    [RelayCommand]
+    private void TogglePm25() => IsPm25Visible = !IsPm25Visible;
+
+    [RelayCommand]
+    private void TogglePm4() => IsPm4Visible = !IsPm4Visible;
+
+    [RelayCommand]
+    private void TogglePm10() => IsPm10Visible = !IsPm10Visible;
+
+    [RelayCommand]
+    private void ToggleVoc() => IsVocVisible = !IsVocVisible;
+
+    [RelayCommand]
+    private void ToggleNox() => IsNoxVisible = !IsNoxVisible;
 
     [RelayCommand]
     private async Task SelectLogFolder()
@@ -453,6 +507,16 @@ public sealed partial class MainPageModel : ObservableObject
     public void AddChartReadingForTest(SensorReading reading)
     {
         AddChartReading(reading);
+    }
+
+    public void ResetChartSessionForTest()
+    {
+        ResetChartSession();
+    }
+
+    public void AddDiscoveredDeviceForTest(DiscoveredSensorDevice device)
+    {
+        UpsertDevice(device);
     }
 
     private void OnDeviceDiscovered(object? sender, DiscoveredSensorDevice device)
@@ -525,7 +589,7 @@ public sealed partial class MainPageModel : ObservableObject
     {
         try
         {
-            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            await Task.Delay(TimeSpan.FromSeconds(ManualLabelConfirmationTimeoutSeconds), cancellationToken);
             if (_pendingManualLabel == requestedLabel)
             {
                 MainThread.BeginInvokeOnMainThread(() =>
@@ -569,7 +633,8 @@ public sealed partial class MainPageModel : ObservableObject
         AddPoint(HumidityValues, elapsedSeconds, reading.Humidity);
         AddPoint(TemperatureValues, elapsedSeconds, reading.Temperature);
         AddPoint(Co2Values, elapsedSeconds, reading.Co2.HasValue ? reading.Co2.Value : null);
-        TrimChartCollections();
+        TrimChartCollections(elapsedSeconds);
+        UpdateChartWindow(elapsedSeconds);
 #if ANDROID
         Debug.WriteLine($"[ANDROID-CHART] Reading applied on main thread={IsMainThreadForDiagnostics()}");
 #endif
@@ -616,6 +681,7 @@ public sealed partial class MainPageModel : ObservableObject
 
     private void UpsertDevice(DiscoveredSensorDevice device)
     {
+        var selectedId = SelectedDevice?.Id;
         var existing = Devices.FirstOrDefault(item => item.Id == device.Id);
         if (existing is not null)
         {
@@ -627,8 +693,55 @@ public sealed partial class MainPageModel : ObservableObject
             Devices.Add(device);
         }
 
+        ReorderDevicesPreservingSelection(selectedId);
         SelectedDevice ??= Devices.FirstOrDefault(item => item.AdvertisesExpectedService)
                            ?? Devices.FirstOrDefault(item => item.Name.Contains(ExpectedDeviceName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void ReorderDevicesPreservingSelection(string? selectedId = null)
+    {
+        selectedId ??= SelectedDevice?.Id;
+        var ordered = Devices
+            .Select((device, index) => new
+            {
+                Device = device,
+                Index = index,
+                Priority = IsExactNameMatchToSearchText(device) ? 0 : 1
+            })
+            .OrderBy(item => item.Priority)
+            .ThenBy(item => item.Index)
+            .Select(item => item.Device)
+            .ToList();
+
+        for (var targetIndex = 0; targetIndex < ordered.Count; targetIndex++)
+        {
+            var currentIndex = Devices.IndexOf(ordered[targetIndex]);
+            if (currentIndex >= 0 && currentIndex != targetIndex)
+            {
+                Devices.Move(currentIndex, targetIndex);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(selectedId))
+        {
+            var selectedDevice = Devices.FirstOrDefault(device => string.Equals(device.Id, selectedId, StringComparison.Ordinal));
+            if (selectedDevice is not null && !Equals(SelectedDevice, selectedDevice))
+            {
+                SelectedDevice = selectedDevice;
+            }
+        }
+    }
+
+    private bool IsExactNameMatchToSearchText(DiscoveredSensorDevice device)
+        => IsExactNameMatch(SearchText, device.Name);
+
+    public static bool IsExactNameMatch(string? searchText, string? deviceName)
+    {
+        var normalizedSearch = searchText?.Trim() ?? string.Empty;
+        var normalizedName = deviceName?.Trim() ?? string.Empty;
+
+        return normalizedSearch.Length > 0 &&
+               string.Equals(normalizedName, normalizedSearch, StringComparison.OrdinalIgnoreCase);
     }
 
     private void UpdateState(BluetoothConnectionState state)
@@ -698,19 +811,51 @@ public sealed partial class MainPageModel : ObservableObject
     }
 
     private static Axis[] CreateElapsedSecondsAxes()
-        => [new Axis { Labeler = value => $"{value:0}s" }];
+        => [new Axis { MinLimit = 0, MaxLimit = ChartWindowSeconds, Labeler = FormatElapsedAxisLabel }];
 
     private static Axis[] CreateZeroMinAxes()
         => [new Axis { MinLimit = 0, MaxLimit = null }];
 
-    private void TrimChartCollections()
+    private void TrimChartCollections(double latestElapsedSeconds)
     {
+        var cutoff = Math.Max(0, latestElapsedSeconds - ChartWindowSeconds);
         foreach (var values in AllChartValueCollections())
         {
+            while (values.Count > 0 && (values[0].X ?? double.NegativeInfinity) < cutoff)
+            {
+                values.RemoveAt(0);
+            }
+
             while (values.Count > ChartMaximumPoints)
             {
                 values.RemoveAt(0);
             }
+        }
+    }
+
+    private void ResetChartSession()
+    {
+        _chartStartTimestamp = null;
+
+        foreach (var values in AllChartValueCollections())
+        {
+            values.Clear();
+        }
+
+        UpdateChartWindow(0);
+    }
+
+    private void UpdateChartWindow(double latestElapsedSeconds)
+    {
+        var min = latestElapsedSeconds <= ChartWindowSeconds
+            ? 0
+            : latestElapsedSeconds - ChartWindowSeconds;
+        var max = min + ChartWindowSeconds;
+
+        foreach (var axes in AllChartXAxes())
+        {
+            axes[0].MinLimit = min;
+            axes[0].MaxLimit = max;
         }
     }
 
@@ -727,6 +872,15 @@ public sealed partial class MainPageModel : ObservableObject
         yield return Co2Values;
     }
 
+    private IEnumerable<Axis[]> AllChartXAxes()
+    {
+        yield return PmXAxes;
+        yield return VocNoxXAxes;
+        yield return HumidityXAxes;
+        yield return TemperatureXAxes;
+        yield return Co2XAxes;
+    }
+
     private static void SetSeriesVisibility(LineSeries<ObservablePoint> series, bool isVisible)
     {
         series.IsVisible = isVisible;
@@ -738,6 +892,16 @@ public sealed partial class MainPageModel : ObservableObject
 
     private static string Format(double? value, string format)
         => value.HasValue ? value.Value.ToString(format) : "--";
+
+    private static string ToHex(SKColor color)
+        => $"#{color.Red:X2}{color.Green:X2}{color.Blue:X2}";
+
+    private static string FormatElapsedAxisLabel(double seconds)
+    {
+        var clampedSeconds = Math.Max(0, seconds);
+        var totalSeconds = (int)Math.Round(clampedSeconds);
+        return $"{totalSeconds / 60}:{totalSeconds % 60:00}";
+    }
 
     private static bool IsMainThreadForDiagnostics()
     {

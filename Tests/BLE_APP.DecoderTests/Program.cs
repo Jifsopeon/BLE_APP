@@ -2,6 +2,10 @@ using System.Buffers.Binary;
 using BLE_APP.Models;
 using BLE_APP.PageModels;
 using BLE_APP.Services;
+using LiveChartsCore;
+using LiveChartsCore.Defaults;
+using LiveChartsCore.SkiaSharpView;
+using LiveChartsCore.SkiaSharpView.Painting;
 
 var decoder = new SensorPacketDecoder();
 
@@ -21,23 +25,42 @@ CsvHeaderMatchesExpectedOrder();
 CsvRowFormatsManualLabelAndRawValue();
 CsvRowUsesInvariantFormattingAndOffsetTimestamp();
 CsvRowTimeUsesSecondsWithoutMilliseconds();
+CsvRowsFollowOneSecondNotifications();
 LogFilenameParsingIgnoresMalformedNames();
 LogFilenameAllocationHandlesGapsAndCollisions();
+LogFilenameAllocationUsesSelectedFolderNamesDirectly();
+LogFilenameAllocationHandlesSelectedFolderNamedLog();
 OneReadingAddsOnePointToAllChartSeries();
 AllChartPointsFromOneReadingUseSameX();
 PmSeriesRemainAligned();
 VocAndNoxRemainAligned();
 HumidityTemperatureAndCo2ReceivePoints();
 DistanceReceivesNoChartPoint();
-CollectionCountDoesNotExceedMaximum();
-OldestPointsAreRemovedCorrectly();
+InitialChartXAxisRangeIsFiveMinutes();
+ChartWindowRetainsInclusiveFiveMinuteBoundary();
+ChartWindowPrunesPointsOlderThanFiveMinutes();
+ChartWindowRetainsOneSecondSamplesForFiveMinutes();
+ChartWindowUsesElapsedTimeNotPointCount();
+AllChartAxesShareLatestFiveMinuteWindow();
 HiddenSeriesDataContinuesAccumulating();
+HiddenSeriesIsPrunedToChartWindow();
 RestoringSeriesPreservesHistory();
+ResetChartSessionClearsPointsAndTimeWindow();
 DisconnectDoesNotClearHistory();
 ReconnectDoesNotDuplicateSubscriptions();
 YAxisMinimumIsZero();
 ChartCollectionsUseViewModelUpdatePath();
+ChartSeriesColorPropertiesMatchStrokeColors();
+ChartSeriesColorsStayStableWhenVisibilityChanges();
+ManualLabelConfirmationTimeoutAllowsOneSecondSampling();
 await ManualLabelUiCommandRequestsSmoking();
+ExactNameMatchUsesOrdinalIgnoreCaseAndTrim();
+ExactNameMatchIgnoresEmptySearch();
+ExactNameMatchOrdersAheadOfPartialAndIdMatches();
+MultipleExactNameMatchesStayGroupedWithStableOrder();
+DuplicateAdvertisementUpdatesWithoutDuplicateRows();
+RssiUpdatePreservesSelection();
+SearchTextChangeReordersDeviceList();
 
 Console.WriteLine("SensorPacketDecoder and direct chart-data tests passed.");
 
@@ -201,6 +224,19 @@ void CsvRowTimeUsesSecondsWithoutMilliseconds()
     Equal(false, columns[2].Contains('.', StringComparison.Ordinal), "csv time has no fractional seconds");
 }
 
+void CsvRowsFollowOneSecondNotifications()
+{
+    var start = DateTimeOffset.Parse("2026-07-14T08:05:09+08:00");
+    var rows = Enumerable.Range(0, 3)
+        .Select(index => SensorCsvFormatter.FormatRow(index + 1, start, MakeReading(timestamp: start.AddSeconds(index), sequence: (ushort)index)))
+        .ToArray();
+
+    Equal(3, rows.Length, "csv rows for one-second notifications");
+    Equal("08:05:09", rows[0].Split(',')[2], "csv first one-second row time");
+    Equal("08:05:10", rows[1].Split(',')[2], "csv second one-second row time");
+    Equal("08:05:11", rows[2].Split(',')[2], "csv third one-second row time");
+}
+
 void LogFilenameParsingIgnoresMalformedNames()
 {
     Equal(23, SensorLogFileNameAllocator.ParseLogNumber("Log0023.csv"), "parse log number");
@@ -220,6 +256,31 @@ void LogFilenameAllocationHandlesGapsAndCollisions()
     var fileName = SensorLogFileNameAllocator.AllocateNextFileName(existing, lastAllocatedNumber: 3, out var allocatedNumber);
     Equal("Log0005.csv", fileName, "allocated filename");
     Equal(5, allocatedNumber, "allocated number");
+}
+
+void LogFilenameAllocationUsesSelectedFolderNamesDirectly()
+{
+    var selectedFolderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "Log0001.csv",
+        "Log0002.csv",
+        "Log0005.csv",
+        "OtherFile.txt",
+        "Log",
+        "Log99.csv"
+    };
+
+    Equal("Log0006.csv", SensorLogFileNameAllocator.AllocateNextFileName(selectedFolderNames), "selected folder direct allocation");
+}
+
+void LogFilenameAllocationHandlesSelectedFolderNamedLog()
+{
+    var explicitlySelectedLogFolderNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "Log0009.csv"
+    };
+
+    Equal("Log0010.csv", SensorLogFileNameAllocator.AllocateNextFileName(explicitlySelectedLogFolderNames), "selected folder named Log allocation");
 }
 
 void OneReadingAddsOnePointToAllChartSeries()
@@ -298,22 +359,83 @@ void DistanceReceivesNoChartPoint()
     Equal(false, allSeries.Any(series => string.Equals(series.Name, "Distance", StringComparison.OrdinalIgnoreCase)), "distance series absent");
 }
 
-void CollectionCountDoesNotExceedMaximum()
+void InitialChartXAxisRangeIsFiveMinutes()
 {
     var model = CreateModel();
-    AddManyReadings(model, MainPageModel.ChartMaximumPoints + 5);
 
-    Equal(MainPageModel.ChartMaximumPoints, model.Pm1Values.Count, "pm1 rolling count");
-    Equal(MainPageModel.ChartMaximumPoints, model.Co2Values.Count, "co2 rolling count");
+    Equal(0.0, model.PmXAxes[0].MinLimit ?? double.NaN, "initial pm x min");
+    Equal(MainPageModel.ChartWindowSeconds, model.PmXAxes[0].MaxLimit ?? double.NaN, "initial pm x max");
+    Equal(0.0, model.Co2XAxes[0].MinLimit ?? double.NaN, "initial co2 x min");
+    Equal(MainPageModel.ChartWindowSeconds, model.Co2XAxes[0].MaxLimit ?? double.NaN, "initial co2 x max");
 }
 
-void OldestPointsAreRemovedCorrectly()
+void ChartWindowRetainsInclusiveFiveMinuteBoundary()
 {
     var model = CreateModel();
-    AddManyReadings(model, MainPageModel.ChartMaximumPoints + 5);
+    AddReadingsAtElapsedSeconds(model, 0, 5, 300);
 
-    Equal(5.0, model.Pm1Values[0].X ?? double.NaN, "oldest x after trim");
-    Equal(304.0, model.Pm1Values[^1].X ?? double.NaN, "newest x after trim");
+    Equal(61, model.Pm1Values.Count, "inclusive window point count at 300s");
+    Equal(0.0, model.Pm1Values[0].X ?? double.NaN, "inclusive first x");
+    Equal(300.0, model.Pm1Values[^1].X ?? double.NaN, "inclusive latest x");
+    Equal(0.0, model.PmXAxes[0].MinLimit ?? double.NaN, "inclusive axis min");
+    Equal(300.0, model.PmXAxes[0].MaxLimit ?? double.NaN, "inclusive axis max");
+}
+
+void ChartWindowPrunesPointsOlderThanFiveMinutes()
+{
+    var model = CreateModel();
+    AddReadingsAtElapsedSeconds(model, 0, 5, 305);
+
+    Equal(61, model.Pm1Values.Count, "pruned window point count at 305s");
+    Equal(5.0, model.Pm1Values[0].X ?? double.NaN, "oldest x after time trim");
+    Equal(305.0, model.Pm1Values[^1].X ?? double.NaN, "newest x after time trim");
+    Equal(5.0, model.PmXAxes[0].MinLimit ?? double.NaN, "scrolled axis min");
+    Equal(305.0, model.PmXAxes[0].MaxLimit ?? double.NaN, "scrolled axis max");
+}
+
+void ChartWindowRetainsOneSecondSamplesForFiveMinutes()
+{
+    var model = CreateModel();
+    AddReadingsAtElapsedSeconds(model, 0, 1, 300);
+
+    Equal(301, model.Pm1Values.Count, "one-second five-minute point count");
+    Equal(0.0, model.Pm1Values[0].X ?? double.NaN, "one-second first x at 300s");
+    Equal(300.0, model.Pm1Values[^1].X ?? double.NaN, "one-second latest x at 300s");
+
+    model.AddChartReadingForTest(MakeReading(timestamp: DateTimeOffset.Parse("2026-07-14T00:05:01Z"), sequence: 301));
+
+    Equal(301, model.Pm1Values.Count, "one-second scrolled five-minute point count");
+    Equal(1.0, model.Pm1Values[0].X ?? double.NaN, "one-second first retained x");
+    Equal(301.0, model.Pm1Values[^1].X ?? double.NaN, "one-second newest x");
+    Equal(1.0, model.PmXAxes[0].MinLimit ?? double.NaN, "one-second axis min");
+    Equal(301.0, model.PmXAxes[0].MaxLimit ?? double.NaN, "one-second axis max");
+}
+
+void ChartWindowUsesElapsedTimeNotPointCount()
+{
+    var model = CreateModel();
+    AddReadingsAtElapsedSeconds(model, 0, 120, 600);
+
+    Equal(3, model.Pm1Values.Count, "delayed sample count");
+    Equal(360.0, model.Pm1Values[0].X ?? double.NaN, "delayed first retained x");
+    Equal(600.0, model.Pm1Values[^1].X ?? double.NaN, "delayed latest x");
+}
+
+void AllChartAxesShareLatestFiveMinuteWindow()
+{
+    var model = CreateModel();
+    AddReadingsAtElapsedSeconds(model, 0, 5, 425);
+
+    Equal(125.0, model.PmXAxes[0].MinLimit ?? double.NaN, "pm x min synced");
+    Equal(425.0, model.PmXAxes[0].MaxLimit ?? double.NaN, "pm x max synced");
+    Equal(model.PmXAxes[0].MinLimit, model.VocNoxXAxes[0].MinLimit, "voc nox x min synced");
+    Equal(model.PmXAxes[0].MaxLimit, model.VocNoxXAxes[0].MaxLimit, "voc nox x max synced");
+    Equal(model.PmXAxes[0].MinLimit, model.HumidityXAxes[0].MinLimit, "humidity x min synced");
+    Equal(model.PmXAxes[0].MaxLimit, model.HumidityXAxes[0].MaxLimit, "humidity x max synced");
+    Equal(model.PmXAxes[0].MinLimit, model.TemperatureXAxes[0].MinLimit, "temperature x min synced");
+    Equal(model.PmXAxes[0].MaxLimit, model.TemperatureXAxes[0].MaxLimit, "temperature x max synced");
+    Equal(model.PmXAxes[0].MinLimit, model.Co2XAxes[0].MinLimit, "co2 x min synced");
+    Equal(model.PmXAxes[0].MaxLimit, model.Co2XAxes[0].MaxLimit, "co2 x max synced");
 }
 
 void HiddenSeriesDataContinuesAccumulating()
@@ -326,6 +448,17 @@ void HiddenSeriesDataContinuesAccumulating()
     Equal(3, model.Pm25Values.Count, "hidden pm25 retained count");
 }
 
+void HiddenSeriesIsPrunedToChartWindow()
+{
+    var model = CreateModel();
+    model.IsPm25Visible = false;
+    AddReadingsAtElapsedSeconds(model, 0, 5, 305);
+
+    Equal(false, model.IsPm25Visible, "pm25 hidden for pruning");
+    Equal(61, model.Pm25Values.Count, "hidden pm25 pruned count");
+    Equal(5.0, model.Pm25Values[0].X ?? double.NaN, "hidden pm25 first retained x");
+}
+
 void RestoringSeriesPreservesHistory()
 {
     var model = CreateModel();
@@ -335,6 +468,21 @@ void RestoringSeriesPreservesHistory()
 
     Equal(true, model.IsVocVisible, "voc restored");
     Equal(3, model.VocValues.Count, "voc restored history");
+}
+
+void ResetChartSessionClearsPointsAndTimeWindow()
+{
+    var model = CreateModel();
+    AddReadingsAtElapsedSeconds(model, 0, 5, 305);
+
+    model.ResetChartSessionForTest();
+
+    Equal(0, model.Pm1Values.Count, "reset clears pm1");
+    Equal(0.0, model.PmXAxes[0].MinLimit ?? double.NaN, "reset x min");
+    Equal(MainPageModel.ChartWindowSeconds, model.PmXAxes[0].MaxLimit ?? double.NaN, "reset x max");
+
+    model.AddChartReadingForTest(MakeReading(timestamp: DateTimeOffset.Parse("2026-07-14T01:00:00Z")));
+    Equal(0.0, model.Pm1Values[0].X ?? double.NaN, "reset restarts elapsed time");
 }
 
 void DisconnectDoesNotClearHistory()
@@ -376,6 +524,62 @@ void ChartCollectionsUseViewModelUpdatePath()
     Equal(true, model.Pm1SeriesReferenceMatches, "pm1 series reference");
 }
 
+void ChartSeriesColorPropertiesMatchStrokeColors()
+{
+    var model = CreateModel();
+
+    Equal(model.Pm1SeriesColor, StrokeHex(model.PmSeries[0]), "pm1 marker color");
+    Equal(model.Pm25SeriesColor, StrokeHex(model.PmSeries[1]), "pm25 marker color");
+    Equal(model.Pm4SeriesColor, StrokeHex(model.PmSeries[2]), "pm4 marker color");
+    Equal(model.Pm10SeriesColor, StrokeHex(model.PmSeries[3]), "pm10 marker color");
+    Equal(model.VocSeriesColor, StrokeHex(model.VocNoxSeries[0]), "voc marker color");
+    Equal(model.NoxSeriesColor, StrokeHex(model.VocNoxSeries[1]), "nox marker color");
+    Equal(model.HumiditySeriesColor, StrokeHex(model.HumiditySeries[0]), "humidity marker color");
+    Equal(model.TemperatureSeriesColor, StrokeHex(model.TemperatureSeries[0]), "temperature marker color");
+    Equal(model.Co2SeriesColor, StrokeHex(model.Co2Series[0]), "co2 marker color");
+}
+
+void ChartSeriesColorsStayStableWhenVisibilityChanges()
+{
+    var model = CreateModel();
+    var pm25Color = model.Pm25SeriesColor;
+    var vocColor = model.VocSeriesColor;
+    var noxColor = model.NoxSeriesColor;
+
+    model.TogglePm25Command.Execute(null);
+    model.ToggleVocCommand.Execute(null);
+    model.ToggleNoxCommand.Execute(null);
+    Equal(false, model.IsPm25Visible, "pm25 toggled off");
+    Equal(false, model.IsVocVisible, "voc toggled off");
+    Equal(false, model.IsNoxVisible, "nox toggled off");
+
+    Equal(pm25Color, model.Pm25SeriesColor, "pm25 hidden marker color");
+    Equal(pm25Color, StrokeHex(model.PmSeries[1]), "pm25 hidden stroke color");
+    Equal(vocColor, model.VocSeriesColor, "voc hidden marker color");
+    Equal(vocColor, StrokeHex(model.VocNoxSeries[0]), "voc hidden stroke color");
+    Equal(noxColor, model.NoxSeriesColor, "nox hidden marker color");
+    Equal(noxColor, StrokeHex(model.VocNoxSeries[1]), "nox hidden stroke color");
+
+    model.TogglePm25Command.Execute(null);
+    model.ToggleVocCommand.Execute(null);
+    model.ToggleNoxCommand.Execute(null);
+    Equal(true, model.IsPm25Visible, "pm25 toggled on");
+    Equal(true, model.IsVocVisible, "voc toggled on");
+    Equal(true, model.IsNoxVisible, "nox toggled on");
+
+    Equal(pm25Color, model.Pm25SeriesColor, "pm25 restored marker color");
+    Equal(pm25Color, StrokeHex(model.PmSeries[1]), "pm25 restored stroke color");
+    Equal(vocColor, model.VocSeriesColor, "voc restored marker color");
+    Equal(vocColor, StrokeHex(model.VocNoxSeries[0]), "voc restored stroke color");
+    Equal(noxColor, model.NoxSeriesColor, "nox restored marker color");
+    Equal(noxColor, StrokeHex(model.VocNoxSeries[1]), "nox restored stroke color");
+}
+
+void ManualLabelConfirmationTimeoutAllowsOneSecondSampling()
+{
+    Equal(true, MainPageModel.ManualLabelConfirmationTimeoutSeconds >= 3, "manual label timeout covers multiple one-second samples");
+}
+
 async Task ManualLabelUiCommandRequestsSmoking()
 {
     var bluetooth = new FakeBluetoothSensorService { CanSetManualLabel = true };
@@ -386,8 +590,108 @@ async Task ManualLabelUiCommandRequestsSmoking()
     Equal(ManualLabelState.Smoking, bluetooth.LastRequestedManualLabel, "ui smoking command");
 }
 
+void ExactNameMatchUsesOrdinalIgnoreCaseAndTrim()
+{
+    Equal(true, MainPageModel.IsExactNameMatch("PSE84-IAQ", "pse84-iaq"), "exact lower-case name");
+    Equal(true, MainPageModel.IsExactNameMatch(" PSE84-IAQ ", " Pse84-Iaq "), "exact trimmed mixed-case name");
+    Equal(false, MainPageModel.IsExactNameMatch("PSE84", "PSE84-IAQ"), "partial name is not exact");
+}
+
+void ExactNameMatchIgnoresEmptySearch()
+{
+    Equal(false, MainPageModel.IsExactNameMatch(string.Empty, string.Empty), "empty search no exact match");
+    Equal(false, MainPageModel.IsExactNameMatch("   ", "(unnamed)"), "whitespace search no exact match");
+    Equal(false, MainPageModel.IsExactNameMatch(null, "PSE84-IAQ"), "null search no exact match");
+}
+
+void ExactNameMatchOrdersAheadOfPartialAndIdMatches()
+{
+    var model = CreateModel();
+    model.SearchText = "PSE84-IAQ";
+
+    model.AddDiscoveredDeviceForTest(MakeDevice("id-partial", "PSE84-IAQ-TEST"));
+    model.AddDiscoveredDeviceForTest(MakeDevice("PSE84-IAQ", "ID match only"));
+    model.AddDiscoveredDeviceForTest(MakeDevice("id-exact", "pse84-iaq"));
+
+    Equal("id-exact", model.Devices[0].Id, "exact name first");
+    Equal("id-partial", model.Devices[1].Id, "partial remains below exact");
+    Equal("PSE84-IAQ", model.Devices[2].Id, "id match does not outrank exact name");
+}
+
+void MultipleExactNameMatchesStayGroupedWithStableOrder()
+{
+    var model = CreateModel();
+    model.SearchText = "PSE84-IAQ";
+
+    model.AddDiscoveredDeviceForTest(MakeDevice("partial", "PSE84-IAQ-TEST"));
+    model.AddDiscoveredDeviceForTest(MakeDevice("exact-1", "PSE84-IAQ"));
+    model.AddDiscoveredDeviceForTest(MakeDevice("exact-2", " pse84-iaq "));
+
+    Equal("exact-1", model.Devices[0].Id, "first exact remains first exact");
+    Equal("exact-2", model.Devices[1].Id, "second exact remains second exact");
+    Equal("partial", model.Devices[2].Id, "partial remains after exact group");
+}
+
+void DuplicateAdvertisementUpdatesWithoutDuplicateRows()
+{
+    var model = CreateModel();
+    model.SearchText = "PSE84-IAQ";
+
+    model.AddDiscoveredDeviceForTest(MakeDevice("same-id", "Other", rssi: -70));
+    model.AddDiscoveredDeviceForTest(MakeDevice("same-id", "pse84-iaq", rssi: -40));
+
+    Equal(1, model.Devices.Count, "duplicate advertisement count");
+    Equal("pse84-iaq", model.Devices[0].Name, "duplicate advertisement updates name");
+    Equal(-40, model.Devices[0].SignalStrengthDbm, "duplicate advertisement updates rssi");
+}
+
+void RssiUpdatePreservesSelection()
+{
+    var model = CreateModel();
+    model.SearchText = "PSE84-IAQ";
+
+    model.AddDiscoveredDeviceForTest(MakeDevice("selected", "Other", rssi: -80));
+    model.AddDiscoveredDeviceForTest(MakeDevice("exact", "PSE84-IAQ", rssi: -60));
+    model.SelectedDevice = model.Devices.First(device => device.Id == "selected");
+
+    model.AddDiscoveredDeviceForTest(MakeDevice("selected", "Other", rssi: -30));
+
+    Equal("selected", model.SelectedDevice?.Id, "selection preserved after rssi update");
+    Equal(2, model.Devices.Count, "rssi update does not duplicate selected device");
+}
+
+void SearchTextChangeReordersDeviceList()
+{
+    var model = CreateModel();
+    model.SearchText = "Other";
+
+    model.AddDiscoveredDeviceForTest(MakeDevice("other", "Other"));
+    model.AddDiscoveredDeviceForTest(MakeDevice("target", "PSE84-IAQ"));
+
+    Equal("other", model.Devices[0].Id, "initial exact first");
+
+    model.SearchText = " pse84-iaq ";
+
+    Equal("target", model.Devices[0].Id, "search change promotes new exact match");
+    Equal("other", model.Devices[1].Id, "previous exact demoted stably");
+}
+
 static MainPageModel CreateModel()
     => new(new FakeBluetoothSensorService(), new FakeSensorLogService());
+
+static DiscoveredSensorDevice MakeDevice(string id, string name, int rssi = -60, bool advertisesExpectedService = false)
+    => new(id, name, rssi, advertisesExpectedService, DateTimeOffset.Parse("2026-07-14T00:00:00Z"));
+
+static string StrokeHex(ISeries series)
+{
+    if (series is not LineSeries<ObservablePoint> lineSeries || lineSeries.Stroke is not SolidColorPaint stroke)
+    {
+        throw new InvalidOperationException($"{series.Name}: expected a line series with a solid color stroke.");
+    }
+
+    var color = stroke.Color;
+    return $"#{color.Red:X2}{color.Green:X2}{color.Blue:X2}";
+}
 
 static void AddManyReadings(MainPageModel model, int count)
 {
@@ -395,6 +699,16 @@ static void AddManyReadings(MainPageModel model, int count)
     for (ushort sequence = 0; sequence < count; sequence++)
     {
         model.AddChartReadingForTest(MakeReading(timestamp: start.AddSeconds(sequence), sequence: sequence));
+    }
+}
+
+static void AddReadingsAtElapsedSeconds(MainPageModel model, int startSeconds, int stepSeconds, int endSeconds)
+{
+    var start = DateTimeOffset.Parse("2026-07-14T00:00:00Z");
+    ushort sequence = 0;
+    for (var elapsedSeconds = startSeconds; elapsedSeconds <= endSeconds; elapsedSeconds += stepSeconds)
+    {
+        model.AddChartReadingForTest(MakeReading(timestamp: start.AddSeconds(elapsedSeconds), sequence: sequence++));
     }
 }
 

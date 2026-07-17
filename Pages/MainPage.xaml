@@ -22,7 +22,10 @@
     </ContentPage.Behaviors>
 
     <ScrollView>
-        <Grid Padding="24" RowSpacing="18" ColumnSpacing="16">
+        <Grid x:Name="PageGrid"
+              Padding="24"
+              RowSpacing="18"
+              ColumnSpacing="16">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -49,7 +52,8 @@
                 <Border.StrokeShape>
                     <RoundRectangle CornerRadius="6" />
                 </Border.StrokeShape>
-                <Grid RowSpacing="12">
+                <Grid x:Name="BleSectionGrid"
+                      RowSpacing="12">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
@@ -57,7 +61,8 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <Grid ColumnDefinitions="*,Auto"
+                    <Grid x:Name="BleHeaderGrid"
+                          ColumnDefinitions="*,Auto"
                           ColumnSpacing="12">
                         <VerticalStackLayout Spacing="2">
                             <Label Text="BLE Connection"
@@ -67,33 +72,43 @@
                                    FontSize="13"
                                    TextColor="{AppThemeBinding Light=#666666, Dark=#C8C8C8}" />
                         </VerticalStackLayout>
-                        <Label Grid.Column="1"
+                        <Label x:Name="ConnectionStateLabel"
+                               Grid.Column="1"
                                Text="{Binding ConnectionState}"
                                FontSize="16"
                                FontAttributes="Bold"
-                               HorizontalTextAlignment="End" />
+                               HorizontalTextAlignment="End"
+                               LineBreakMode="WordWrap" />
                     </Grid>
 
-                    <Grid Grid.Row="1"
+                    <Grid x:Name="BleSearchGrid"
+                          Grid.Row="1"
                           ColumnDefinitions="*,Auto,Auto"
                           ColumnSpacing="10">
-                        <SearchBar Placeholder="Search devices"
+                        <SearchBar x:Name="SearchDevicesBar"
+                                   Placeholder="Search devices"
                                    Text="{Binding SearchText}"
                                    HeightRequest="44" />
-                        <Button Grid.Column="1"
+                        <Button x:Name="ScanButton"
+                                Grid.Column="1"
                                 Text="Scan"
                                 Command="{Binding ScanCommand}"
-                                HeightRequest="44" />
-                        <Button Grid.Column="2"
+                                HeightRequest="44"
+                                HorizontalOptions="Fill" />
+                        <Button x:Name="CancelScanButton"
+                                Grid.Column="2"
                                 Text="Cancel"
                                 Command="{Binding CancelScanCommand}"
-                                HeightRequest="44" />
+                                HeightRequest="44"
+                                HorizontalOptions="Fill" />
                     </Grid>
 
-                    <Grid Grid.Row="2"
+                    <Grid x:Name="BleDeviceGrid"
+                          Grid.Row="2"
                           ColumnDefinitions="*,Auto,Auto"
                           ColumnSpacing="10">
-                        <CollectionView ItemsSource="{Binding Devices}"
+                        <CollectionView x:Name="DeviceList"
+                                        ItemsSource="{Binding Devices}"
                                         SelectedItem="{Binding SelectedDevice}"
                                         SelectionMode="Single"
                                         HeightRequest="150">
@@ -109,7 +124,8 @@
                                         <Label Grid.Row="1"
                                                Text="{Binding Id}"
                                                FontSize="12"
-                                               TextColor="{AppThemeBinding Light=#666666, Dark=#C8C8C8}" />
+                                               TextColor="{AppThemeBinding Light=#666666, Dark=#C8C8C8}"
+                                               LineBreakMode="TailTruncation" />
                                         <Label Grid.Row="1"
                                                Grid.Column="1"
                                                Text="IAQ"
@@ -120,19 +136,24 @@
                             </CollectionView.ItemTemplate>
                         </CollectionView>
 
-                        <Button Grid.Column="1"
+                        <Button x:Name="ConnectButton"
+                                Grid.Column="1"
                                 Text="Connect"
                                 Command="{Binding ConnectCommand}"
                                 HeightRequest="44"
-                                VerticalOptions="Start" />
-                        <VerticalStackLayout Grid.Column="2"
+                                VerticalOptions="Start"
+                                HorizontalOptions="Fill" />
+                        <VerticalStackLayout x:Name="DisconnectButtonStack"
+                                             Grid.Column="2"
                                              Spacing="8">
                             <Button Text="Disconnect"
                                     Command="{Binding DisconnectCommand}"
-                                    HeightRequest="44" />
+                                    HeightRequest="44"
+                                    HorizontalOptions="Fill" />
                             <Button Text="Reconnect"
                                     Command="{Binding ReconnectCommand}"
-                                    HeightRequest="44" />
+                                    HeightRequest="44"
+                                    HorizontalOptions="Fill" />
                         </VerticalStackLayout>
                     </Grid>
 
@@ -151,7 +172,8 @@
                 <Border.StrokeShape>
                     <RoundRectangle CornerRadius="6" />
                 </Border.StrokeShape>
-                <Grid ColumnDefinitions="*,Auto"
+                <Grid x:Name="LoggingSectionGrid"
+                      ColumnDefinitions="*,Auto"
                       ColumnSpacing="12"
                       RowSpacing="8">
                     <Grid.RowDefinitions>
@@ -166,13 +188,15 @@
                         <Label Text="{Binding LogFolderDisplayText}"
                                FontSize="16"
                                FontAttributes="Bold"
-                               LineBreakMode="MiddleTruncation" />
+                               LineBreakMode="WordWrap" />
                     </VerticalStackLayout>
-                    <Button Grid.Column="1"
+                    <Button x:Name="SelectFolderButton"
+                            Grid.Column="1"
                             Text="Select Folder"
                             Command="{Binding SelectLogFolderCommand}"
                             HeightRequest="44"
-                            VerticalOptions="Center" />
+                            VerticalOptions="Center"
+                            HorizontalOptions="Fill" />
                     <Label Grid.Row="1"
                            Grid.ColumnSpan="2"
                            Text="{Binding LoggingStatusText}"
@@ -224,7 +248,8 @@
                                     ItemsSource="{Binding Metrics}"
                                     SelectionMode="None">
                         <CollectionView.ItemsLayout>
-                            <GridItemsLayout Orientation="Vertical"
+                            <GridItemsLayout x:Name="MetricItemsLayout"
+                                             Orientation="Vertical"
                                              Span="3"
                                              HorizontalItemSpacing="10"
                                              VerticalItemSpacing="10" />
@@ -278,14 +303,18 @@
                                 <Label Text="{Binding ManualLabelPendingText}"
                                        FontSize="12"
                                        TextColor="{AppThemeBinding Light=#666666, Dark=#C8C8C8}" />
-                                <HorizontalStackLayout Spacing="8">
+                                <Grid ColumnDefinitions="*,*"
+                                      ColumnSpacing="8">
                                     <Button Text="No Smoking"
                                             Command="{Binding SetNoSmokingCommand}"
-                                            HeightRequest="40" />
+                                            HeightRequest="40"
+                                            HorizontalOptions="Fill" />
                                     <Button Text="Smoking"
+                                            Grid.Column="1"
                                             Command="{Binding SetSmokingCommand}"
-                                            HeightRequest="40" />
-                                </HorizontalStackLayout>
+                                            HeightRequest="40"
+                                            HorizontalOptions="Fill" />
+                                </Grid>
                                 <Label Text="{Binding ManualLabelText, StringFormat='Confirmed: {0}'}"
                                        FontSize="12"
                                        TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
@@ -344,7 +373,8 @@
                     <VerticalStackLayout Grid.Row="1"
                                          x:Name="GraphPanel"
                                          Spacing="12">
-                        <Grid ColumnSpacing="12"
+                        <Grid x:Name="ChartGrid"
+                              ColumnSpacing="12"
                               RowSpacing="12">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
@@ -356,7 +386,8 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
 
-                            <Border Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
+                            <Border x:Name="PmChartCard"
+                                    Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
                                     StrokeThickness="1"
                                     Padding="12"
                                     BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#151618}">
@@ -378,17 +409,117 @@
                                                FontSize="12"
                                                TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
                                     </Grid>
-                                    <HorizontalStackLayout Grid.Row="1"
-                                                           Spacing="12">
-                                        <CheckBox IsChecked="{Binding IsPm1Visible, Mode=TwoWay}" />
-                                        <Label Text="PM1.0" VerticalOptions="Center" FontSize="12" />
-                                        <CheckBox IsChecked="{Binding IsPm25Visible, Mode=TwoWay}" />
-                                        <Label Text="PM2.5" VerticalOptions="Center" FontSize="12" />
-                                        <CheckBox IsChecked="{Binding IsPm4Visible, Mode=TwoWay}" />
-                                        <Label Text="PM4.0" VerticalOptions="Center" FontSize="12" />
-                                        <CheckBox IsChecked="{Binding IsPm10Visible, Mode=TwoWay}" />
-                                        <Label Text="PM10.0" VerticalOptions="Center" FontSize="12" />
-                                    </HorizontalStackLayout>
+                                    <FlexLayout Grid.Row="1"
+                                                Wrap="Wrap"
+                                                Direction="Row"
+                                                AlignItems="Center"
+                                                JustifyContent="Start"
+                                                AlignContent="Start">
+                                        <HorizontalStackLayout Spacing="6"
+                                                               Margin="0,0,12,6"
+                                                               VerticalOptions="Center">
+                                            <CheckBox IsChecked="{Binding IsPm1Visible, Mode=TwoWay}"
+                                                      SemanticProperties.Description="Show PM1.0 series" />
+                                            <Border WidthRequest="12"
+                                                    HeightRequest="12"
+                                                    StrokeThickness="0"
+                                                    BackgroundColor="{Binding Pm1SeriesColor}">
+                                                <Border.StrokeShape>
+                                                    <RoundRectangle CornerRadius="6" />
+                                                </Border.StrokeShape>
+                                                <Border.GestureRecognizers>
+                                                    <TapGestureRecognizer Command="{Binding TogglePm1Command}" />
+                                                </Border.GestureRecognizers>
+                                            </Border>
+                                            <Label Text="PM1.0"
+                                                   VerticalOptions="Center"
+                                                   VerticalTextAlignment="Center"
+                                                   FontSize="12"
+                                                   LineBreakMode="TailTruncation">
+                                                <Label.GestureRecognizers>
+                                                    <TapGestureRecognizer Command="{Binding TogglePm1Command}" />
+                                                </Label.GestureRecognizers>
+                                            </Label>
+                                        </HorizontalStackLayout>
+                                        <HorizontalStackLayout Spacing="6"
+                                                               Margin="0,0,12,6"
+                                                               VerticalOptions="Center">
+                                            <CheckBox IsChecked="{Binding IsPm25Visible, Mode=TwoWay}"
+                                                      SemanticProperties.Description="Show PM2.5 series" />
+                                            <Border WidthRequest="12"
+                                                    HeightRequest="12"
+                                                    StrokeThickness="0"
+                                                    BackgroundColor="{Binding Pm25SeriesColor}">
+                                                <Border.StrokeShape>
+                                                    <RoundRectangle CornerRadius="6" />
+                                                </Border.StrokeShape>
+                                                <Border.GestureRecognizers>
+                                                    <TapGestureRecognizer Command="{Binding TogglePm25Command}" />
+                                                </Border.GestureRecognizers>
+                                            </Border>
+                                            <Label Text="PM2.5"
+                                                   VerticalOptions="Center"
+                                                   VerticalTextAlignment="Center"
+                                                   FontSize="12"
+                                                   LineBreakMode="TailTruncation">
+                                                <Label.GestureRecognizers>
+                                                    <TapGestureRecognizer Command="{Binding TogglePm25Command}" />
+                                                </Label.GestureRecognizers>
+                                            </Label>
+                                        </HorizontalStackLayout>
+                                        <HorizontalStackLayout Spacing="6"
+                                                               Margin="0,0,12,6"
+                                                               VerticalOptions="Center">
+                                            <CheckBox IsChecked="{Binding IsPm4Visible, Mode=TwoWay}"
+                                                      SemanticProperties.Description="Show PM4.0 series" />
+                                            <Border WidthRequest="12"
+                                                    HeightRequest="12"
+                                                    StrokeThickness="0"
+                                                    BackgroundColor="{Binding Pm4SeriesColor}">
+                                                <Border.StrokeShape>
+                                                    <RoundRectangle CornerRadius="6" />
+                                                </Border.StrokeShape>
+                                                <Border.GestureRecognizers>
+                                                    <TapGestureRecognizer Command="{Binding TogglePm4Command}" />
+                                                </Border.GestureRecognizers>
+                                            </Border>
+                                            <Label Text="PM4.0"
+                                                   VerticalOptions="Center"
+                                                   VerticalTextAlignment="Center"
+                                                   FontSize="12"
+                                                   LineBreakMode="TailTruncation">
+                                                <Label.GestureRecognizers>
+                                                    <TapGestureRecognizer Command="{Binding TogglePm4Command}" />
+                                                </Label.GestureRecognizers>
+                                            </Label>
+                                        </HorizontalStackLayout>
+                                        <HorizontalStackLayout Spacing="6"
+                                                               Margin="0,0,12,6"
+                                                               VerticalOptions="Center">
+                                            <CheckBox IsChecked="{Binding IsPm10Visible, Mode=TwoWay}"
+                                                      SemanticProperties.Description="Show PM10.0 series" />
+                                            <Border WidthRequest="12"
+                                                    HeightRequest="12"
+                                                    StrokeThickness="0"
+                                                    BackgroundColor="{Binding Pm10SeriesColor}">
+                                                <Border.StrokeShape>
+                                                    <RoundRectangle CornerRadius="6" />
+                                                </Border.StrokeShape>
+                                                <Border.GestureRecognizers>
+                                                    <TapGestureRecognizer Command="{Binding TogglePm10Command}" />
+                                                </Border.GestureRecognizers>
+                                            </Border>
+                                            <Label Text="PM10.0"
+                                                   VerticalOptions="Center"
+                                                   VerticalTextAlignment="Center"
+                                                   FontSize="12"
+                                                   LineBreakMode="TailTruncation">
+                                                <Label.GestureRecognizers>
+                                                    <TapGestureRecognizer Command="{Binding TogglePm10Command}" />
+                                                </Label.GestureRecognizers>
+                                            </Label>
+                                        </HorizontalStackLayout>
+                                    </FlexLayout>
                                     <lvc:CartesianChart x:Name="PmChart"
                                                         Grid.Row="2"
                                                         Series="{Binding PmSeries}"
@@ -402,7 +533,8 @@
                                 </Grid>
                             </Border>
 
-                            <Border Grid.Column="1"
+                            <Border x:Name="VocNoxChartCard"
+                                    Grid.Column="1"
                                     Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
                                     StrokeThickness="1"
                                     Padding="12"
@@ -425,13 +557,65 @@
                                                FontSize="12"
                                                TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
                                     </Grid>
-                                    <HorizontalStackLayout Grid.Row="1"
-                                                           Spacing="12">
-                                        <CheckBox IsChecked="{Binding IsVocVisible, Mode=TwoWay}" />
-                                        <Label Text="VOC" VerticalOptions="Center" FontSize="12" />
-                                        <CheckBox IsChecked="{Binding IsNoxVisible, Mode=TwoWay}" />
-                                        <Label Text="NOx" VerticalOptions="Center" FontSize="12" />
-                                    </HorizontalStackLayout>
+                                    <FlexLayout Grid.Row="1"
+                                                Wrap="Wrap"
+                                                Direction="Row"
+                                                AlignItems="Center"
+                                                JustifyContent="Start"
+                                                AlignContent="Start">
+                                        <HorizontalStackLayout Spacing="6"
+                                                               Margin="0,0,12,6"
+                                                               VerticalOptions="Center">
+                                            <CheckBox IsChecked="{Binding IsVocVisible, Mode=TwoWay}"
+                                                      SemanticProperties.Description="Show VOC series" />
+                                            <Border WidthRequest="12"
+                                                    HeightRequest="12"
+                                                    StrokeThickness="0"
+                                                    BackgroundColor="{Binding VocSeriesColor}">
+                                                <Border.StrokeShape>
+                                                    <RoundRectangle CornerRadius="6" />
+                                                </Border.StrokeShape>
+                                                <Border.GestureRecognizers>
+                                                    <TapGestureRecognizer Command="{Binding ToggleVocCommand}" />
+                                                </Border.GestureRecognizers>
+                                            </Border>
+                                            <Label Text="VOC"
+                                                   VerticalOptions="Center"
+                                                   VerticalTextAlignment="Center"
+                                                   FontSize="12"
+                                                   LineBreakMode="TailTruncation">
+                                                <Label.GestureRecognizers>
+                                                    <TapGestureRecognizer Command="{Binding ToggleVocCommand}" />
+                                                </Label.GestureRecognizers>
+                                            </Label>
+                                        </HorizontalStackLayout>
+                                        <HorizontalStackLayout Spacing="6"
+                                                               Margin="0,0,12,6"
+                                                               VerticalOptions="Center">
+                                            <CheckBox IsChecked="{Binding IsNoxVisible, Mode=TwoWay}"
+                                                      SemanticProperties.Description="Show NOx series" />
+                                            <Border WidthRequest="12"
+                                                    HeightRequest="12"
+                                                    StrokeThickness="0"
+                                                    BackgroundColor="{Binding NoxSeriesColor}">
+                                                <Border.StrokeShape>
+                                                    <RoundRectangle CornerRadius="6" />
+                                                </Border.StrokeShape>
+                                                <Border.GestureRecognizers>
+                                                    <TapGestureRecognizer Command="{Binding ToggleNoxCommand}" />
+                                                </Border.GestureRecognizers>
+                                            </Border>
+                                            <Label Text="NOx"
+                                                   VerticalOptions="Center"
+                                                   VerticalTextAlignment="Center"
+                                                   FontSize="12"
+                                                   LineBreakMode="TailTruncation">
+                                                <Label.GestureRecognizers>
+                                                    <TapGestureRecognizer Command="{Binding ToggleNoxCommand}" />
+                                                </Label.GestureRecognizers>
+                                            </Label>
+                                        </HorizontalStackLayout>
+                                    </FlexLayout>
                                     <lvc:CartesianChart x:Name="VocNoxChart"
                                                         Grid.Row="2"
                                                         Series="{Binding VocNoxSeries}"
@@ -445,7 +629,8 @@
                                 </Grid>
                             </Border>
 
-                            <Border Grid.Row="1"
+                            <Border x:Name="HumidityChartCard"
+                                    Grid.Row="1"
                                     Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
                                     StrokeThickness="1"
                                     Padding="12"
@@ -460,9 +645,20 @@
                                         <RowDefinition Height="250" />
                                     </Grid.RowDefinitions>
                                     <Grid ColumnDefinitions="*,Auto">
-                                        <Label Text="Humidity"
-                                               FontSize="16"
-                                               FontAttributes="Bold" />
+                                        <HorizontalStackLayout Spacing="6"
+                                                               VerticalOptions="Center">
+                                            <Border WidthRequest="12"
+                                                    HeightRequest="12"
+                                                    StrokeThickness="0"
+                                                    BackgroundColor="{Binding HumiditySeriesColor}">
+                                                <Border.StrokeShape>
+                                                    <RoundRectangle CornerRadius="6" />
+                                                </Border.StrokeShape>
+                                            </Border>
+                                            <Label Text="Humidity"
+                                                   FontSize="16"
+                                                   FontAttributes="Bold" />
+                                        </HorizontalStackLayout>
                                         <Label Grid.Column="1"
                                                Text="% RH"
                                                FontSize="12"
@@ -482,7 +678,8 @@
                                 </Grid>
                             </Border>
 
-                            <Border Grid.Row="1"
+                            <Border x:Name="TemperatureChartCard"
+                                    Grid.Row="1"
                                     Grid.Column="1"
                                     Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
                                     StrokeThickness="1"
@@ -498,9 +695,20 @@
                                         <RowDefinition Height="250" />
                                     </Grid.RowDefinitions>
                                     <Grid ColumnDefinitions="*,Auto">
-                                        <Label Text="Temperature"
-                                               FontSize="16"
-                                               FontAttributes="Bold" />
+                                        <HorizontalStackLayout Spacing="6"
+                                                               VerticalOptions="Center">
+                                            <Border WidthRequest="12"
+                                                    HeightRequest="12"
+                                                    StrokeThickness="0"
+                                                    BackgroundColor="{Binding TemperatureSeriesColor}">
+                                                <Border.StrokeShape>
+                                                    <RoundRectangle CornerRadius="6" />
+                                                </Border.StrokeShape>
+                                            </Border>
+                                            <Label Text="Temperature"
+                                                   FontSize="16"
+                                                   FontAttributes="Bold" />
+                                        </HorizontalStackLayout>
                                         <Label Grid.Column="1"
                                                Text="°C"
                                                FontSize="12"
@@ -520,7 +728,8 @@
                                 </Grid>
                             </Border>
 
-                            <Border Grid.Row="2"
+                            <Border x:Name="Co2ChartCard"
+                                    Grid.Row="2"
                                     Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
                                     StrokeThickness="1"
                                     Padding="12"
@@ -535,9 +744,20 @@
                                         <RowDefinition Height="250" />
                                     </Grid.RowDefinitions>
                                     <Grid ColumnDefinitions="*,Auto">
-                                        <Label Text="CO2"
-                                               FontSize="16"
-                                               FontAttributes="Bold" />
+                                        <HorizontalStackLayout Spacing="6"
+                                                               VerticalOptions="Center">
+                                            <Border WidthRequest="12"
+                                                    HeightRequest="12"
+                                                    StrokeThickness="0"
+                                                    BackgroundColor="{Binding Co2SeriesColor}">
+                                                <Border.StrokeShape>
+                                                    <RoundRectangle CornerRadius="6" />
+                                                </Border.StrokeShape>
+                                            </Border>
+                                            <Label Text="CO2"
+                                                   FontSize="16"
+                                                   FontAttributes="Bold" />
+                                        </HorizontalStackLayout>
                                         <Label Grid.Column="1"
                                                Text="ppm"
                                                FontSize="12"
