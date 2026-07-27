@@ -12,9 +12,18 @@ public sealed class SensorPacketDecoder
         if (payload.Length != SensorPacketProtocol.PacketLength)
         {
             throw new SensorPacketFormatException(
-                $"Incompatible firmware packet: expected {SensorPacketProtocol.PacketLength} bytes including Manual label, received {payload.Length} bytes.");
+                $"Incompatible firmware packet: expected {SensorPacketProtocol.PacketLength} bytes, received {payload.Length} bytes.");
         }
 
+        // Bytes 0..1: sequence number, UInt16 little-endian.
+        // Bytes 2..9: PM1.0, PM2.5, PM4.0, PM10.0, UInt16 tenths, little-endian.
+        // Bytes 10..13: humidity and temperature, Int16 scaled by 100 and 200.
+        // Bytes 14..17: NOx and VOC, Int16 tenths.
+        // Bytes 18..19: CO2, UInt16 ppm.
+        // Bytes 20..21: selected radar distance in mm, UInt16 little-endian.
+        // Byte 22: active manual label, 0 = No Smoking, 1 = Smoking.
+        // Convert radar distance to metres by dividing by 1000.0.
+        // A value of zero means no valid presence distance.
         ushort sequence = BinaryPrimitives.ReadUInt16LittleEndian(payload[0..2]);
         ushort pm1 = BinaryPrimitives.ReadUInt16LittleEndian(payload[2..4]);
         ushort pm25 = BinaryPrimitives.ReadUInt16LittleEndian(payload[4..6]);
@@ -25,13 +34,11 @@ public sealed class SensorPacketDecoder
         short nox = BinaryPrimitives.ReadInt16LittleEndian(payload[14..16]);
         short voc = BinaryPrimitives.ReadInt16LittleEndian(payload[16..18]);
         ushort co2 = BinaryPrimitives.ReadUInt16LittleEndian(payload[18..20]);
-        ushort distanceRaw = BinaryPrimitives.ReadUInt16LittleEndian(payload[20..22]);
+        ushort radarDistanceRaw = BinaryPrimitives.ReadUInt16LittleEndian(payload[SensorPacketProtocol.RadarDistanceOffset..(SensorPacketProtocol.RadarDistanceOffset + 2)]);
         byte manualLabelRaw = payload[SensorPacketProtocol.ManualLabelOffset];
-        if (!SensorPacketProtocol.TryDecodeManualLabel(manualLabelRaw, out var manualLabel))
-        {
-            throw new SensorPacketFormatException(
-                $"Unsupported Manual label raw value {manualLabelRaw} in {payload.Length}-byte packet.");
-        }
+        ManualLabelState manualLabel = SensorPacketProtocol.TryDecodeManualLabel(manualLabelRaw, out var decodedLabel)
+            ? decodedLabel
+            : ManualLabelState.Unknown;
 
         return new SensorReading(
             DateTimeOffset.Now,
@@ -45,7 +52,7 @@ public sealed class SensorPacketDecoder
             ScaleSignedTenths(nox),
             ScaleSignedTenths(voc),
             co2 == 0xFFFF ? null : co2,
-            distanceRaw / 1000.0,
+            radarDistanceRaw / 1000.0,
             manualLabel,
             manualLabelRaw);
     }

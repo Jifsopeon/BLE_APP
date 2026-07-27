@@ -5,6 +5,7 @@ namespace BLE_APP.Services;
 public static class SensorPacketProtocol
 {
     public const int PacketLength = 23;
+    public const int RadarDistanceOffset = 20;
     public const int ManualLabelOffset = 22;
     public const byte ManualLabelNoSmokingRaw = 0;
     public const byte ManualLabelSmokingRaw = 1;
@@ -16,6 +17,7 @@ public static class SensorPacketProtocol
         {
             ManualLabelState.NoSmoking => "No Smoking",
             ManualLabelState.Smoking => "Smoking",
+            ManualLabelState.Unknown => "Unknown",
             _ => throw new ArgumentOutOfRangeException(nameof(label), label, "Unsupported Manual label state.")
         };
 

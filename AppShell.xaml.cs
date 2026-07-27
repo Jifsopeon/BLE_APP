@@ -17,9 +17,9 @@ namespace BLE_APP
 
             var snackbarOptions = new SnackbarOptions
             {
-                BackgroundColor = Color.FromArgb("#FF3300"),
+                BackgroundColor = Color.FromArgb("#B3261E"),
                 TextColor = Colors.White,
-                ActionButtonTextColor = Colors.Yellow,
+                ActionButtonTextColor = Color.FromArgb("#DCEFD2"),
                 CornerRadius = new CornerRadius(0),
                 Font = Font.SystemFontOfSize(18),
                 ActionButtonFont = Font.SystemFontOfSize(14)

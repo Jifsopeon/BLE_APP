@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using BLE_APP.Models;
 using BLE_APP.PageModels;
 using BLE_APP.Services;
@@ -14,15 +15,21 @@ ActualFirmwarePacketBytesDecode();
 FirstByte03IsSequenceLowByte();
 NegativeTemperatureDecodes();
 DistanceZeroDecodesToZeroMetres();
-FutureDistance1250DecodesToOnePoint25Metres();
-Legacy20BytePacketIsRejected();
-Old22BytePacketIsRejected();
+SingleRadarDistanceDecodesToMetres();
 ManualLabelPacketSmokingDecodes();
 ManualLabelPacketNoSmokingDecodes();
-UnknownManualLabelRawIsRejected();
+UnknownManualLabelRawDecodesAsUnknown();
+Legacy20BytePacketIsRejected();
+Old22BytePacketIsRejected();
 MultipleSequentialPacketsDecode();
 CsvHeaderMatchesExpectedOrder();
 CsvRowFormatsManualLabelAndRawValue();
+CsvRowFormatsOneRadarDistance();
+CsvRowFormatsNoRadarDistanceAsZero();
+CsvRowFormatsInvalidRadarDistanceAsZero();
+CsvRowDistanceFormattingUsesInvariantCulture();
+CsvRowHeaderAndRowColumnCountsMatch();
+CsvRowManualLabelFollowsRadarDistanceColumns();
 CsvRowUsesInvariantFormattingAndOffsetTimestamp();
 CsvRowTimeUsesSecondsWithoutMilliseconds();
 CsvRowsFollowOneSecondNotifications();
@@ -147,9 +154,31 @@ void DistanceZeroDecodesToZeroMetres()
     CloseRequired(0.0, decoder.Decode(MakePacket(distanceRaw: 0)).DistanceMetres, "zero distance");
 }
 
-void FutureDistance1250DecodesToOnePoint25Metres()
+void SingleRadarDistanceDecodesToMetres()
 {
-    CloseRequired(1.25, decoder.Decode(MakePacket(distanceRaw: 1250)).DistanceMetres, "future distance");
+    var reading = decoder.Decode(MakePacket(distanceRaw: 740));
+    CloseRequired(0.74, reading.DistanceMetres, "radar distance");
+}
+
+void ManualLabelPacketSmokingDecodes()
+{
+    var reading = decoder.Decode(MakePacket(manualLabelRaw: SensorPacketProtocol.ManualLabelSmokingRaw));
+    Equal(ManualLabelState.Smoking, reading.ManualLabel, "manual label smoking");
+    Equal((byte)1, reading.ManualLabelRaw, "manual label smoking raw");
+}
+
+void ManualLabelPacketNoSmokingDecodes()
+{
+    var reading = decoder.Decode(MakePacket(manualLabelRaw: SensorPacketProtocol.ManualLabelNoSmokingRaw));
+    Equal(ManualLabelState.NoSmoking, reading.ManualLabel, "manual label no smoking");
+    Equal((byte)0, reading.ManualLabelRaw, "manual label no smoking raw");
+}
+
+void UnknownManualLabelRawDecodesAsUnknown()
+{
+    var reading = decoder.Decode(MakePacket(manualLabelRaw: 0x7F));
+    Equal(ManualLabelState.Unknown, reading.ManualLabel, "manual label unknown");
+    Equal((byte)0x7F, reading.ManualLabelRaw, "manual label unknown raw");
 }
 
 void Legacy20BytePacketIsRejected()
@@ -162,25 +191,6 @@ void Old22BytePacketIsRejected()
     Throws<SensorPacketFormatException>(() => decoder.Decode(MakeLegacyPacket()), "old 22-byte packet");
 }
 
-void ManualLabelPacketSmokingDecodes()
-{
-    var reading = decoder.Decode(MakeManualPacket(SensorPacketProtocol.ManualLabelSmokingRaw));
-    Equal(ManualLabelState.Smoking, reading.ManualLabel, "manual label smoking");
-    Equal((byte)1, reading.ManualLabelRaw, "manual label smoking raw");
-}
-
-void ManualLabelPacketNoSmokingDecodes()
-{
-    var reading = decoder.Decode(MakeManualPacket(SensorPacketProtocol.ManualLabelNoSmokingRaw));
-    Equal(ManualLabelState.NoSmoking, reading.ManualLabel, "manual label no smoking");
-    Equal((byte)0, reading.ManualLabelRaw, "manual label no smoking raw");
-}
-
-void UnknownManualLabelRawIsRejected()
-{
-    Throws<SensorPacketFormatException>(() => decoder.Decode(MakeManualPacket(0x7F)), "unknown manual label raw");
-}
-
 void MultipleSequentialPacketsDecode()
 {
     for (ushort sequence = 0; sequence < 5; sequence++)
@@ -191,7 +201,7 @@ void MultipleSequentialPacketsDecode()
 
 void CsvHeaderMatchesExpectedOrder()
 {
-    Equal("Sample,Date,Time,TimestampISO8601,ElapsedSeconds,PM1_0,PM2_5,PM4_0,PM10,Humidity,Temperature,VOC,NOx,CO2,ManualLabel,ManualLabelRaw",
+    Equal("Sample,Date,Time,TimestampISO8601,ElapsedSeconds,PM1_0,PM2_5,PM4_0,PM10,Humidity,Temperature,VOC,NOx,CO2,distance,ManualLabel,ManualLabelRaw",
         SensorCsvFormatter.Header,
         "csv header");
 }
@@ -203,6 +213,85 @@ void CsvRowFormatsManualLabelAndRawValue()
     var row = SensorCsvFormatter.FormatRow(1, timestamp.AddSeconds(-2), reading);
 
     Equal(true, row.Contains(",Smoking,1", StringComparison.Ordinal), "csv manual label");
+}
+
+void CsvRowFormatsOneRadarDistance()
+{
+    var row = SensorCsvFormatter.FormatRow(1, DateTimeOffset.Parse("2026-07-14T00:00:00Z"), MakeReading() with
+    {
+        DistanceMetres = 0.74
+    });
+    var columns = row.Split(',');
+
+    Equal("0.74", columns[14], "csv distance");
+}
+
+void CsvRowFormatsNoRadarDistanceAsZero()
+{
+    var row = SensorCsvFormatter.FormatRow(1, DateTimeOffset.Parse("2026-07-14T00:00:00Z"), MakeReading() with
+    {
+        DistanceMetres = 0.0
+    });
+    var columns = row.Split(',');
+
+    Equal("0", columns[14], "csv no distance zero");
+}
+
+void CsvRowFormatsInvalidRadarDistanceAsZero()
+{
+    var row = SensorCsvFormatter.FormatRow(1, DateTimeOffset.Parse("2026-07-14T00:00:00Z"), MakeReading() with
+    {
+        DistanceMetres = double.NaN
+    });
+    var columns = row.Split(',');
+
+    Equal("0", columns[14], "csv invalid distance zero");
+}
+
+void CsvRowDistanceFormattingUsesInvariantCulture()
+{
+    var originalCulture = CultureInfo.CurrentCulture;
+    var originalUiCulture = CultureInfo.CurrentUICulture;
+    try
+    {
+        CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
+        CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("fr-FR");
+        var row = SensorCsvFormatter.FormatRow(1, DateTimeOffset.Parse("2026-07-14T00:00:00Z"), MakeReading() with
+        {
+            DistanceMetres = 0.74
+        });
+        var columns = row.Split(',');
+
+        Equal("0.74", columns[14], "csv invariant culture distance");
+    }
+    finally
+    {
+        CultureInfo.CurrentCulture = originalCulture;
+        CultureInfo.CurrentUICulture = originalUiCulture;
+    }
+}
+
+void CsvRowHeaderAndRowColumnCountsMatch()
+{
+    var row = SensorCsvFormatter.FormatRow(1, DateTimeOffset.Parse("2026-07-14T00:00:00Z"), MakeReading());
+
+    Equal(SensorCsvFormatter.Header.Split(',').Length, row.Split(',').Length, "csv header row column count");
+}
+
+void CsvRowManualLabelFollowsRadarDistanceColumns()
+{
+    var row = SensorCsvFormatter.FormatRow(1, DateTimeOffset.Parse("2026-07-14T00:00:00Z"), MakeReading() with
+    {
+        DistanceMetres = 0.74,
+        ManualLabel = ManualLabelState.Unknown,
+        ManualLabelRaw = 0x7F
+    });
+    var columns = row.Split(',');
+
+    Equal("distance", SensorCsvFormatter.Header.Split(',')[14], "csv distance header position");
+    Equal("ManualLabel", SensorCsvFormatter.Header.Split(',')[15], "csv manual label header position");
+    Equal("Unknown", columns[15], "csv manual label follows distance");
+    Equal("127", columns[16], "csv manual label raw follows label");
 }
 
 void CsvRowUsesInvariantFormattingAndOffsetTimestamp()
@@ -740,7 +829,8 @@ static byte[] MakePacket(
     short nox = 50,
     short voc = 60,
     ushort co2 = 700,
-    ushort distanceRaw = 0)
+    ushort distanceRaw = 0,
+    byte manualLabelRaw = SensorPacketProtocol.ManualLabelSmokingRaw)
 {
     var packet = new byte[SensorPacketProtocol.PacketLength];
     WriteU16(packet, 0, sequence);
@@ -753,8 +843,8 @@ static byte[] MakePacket(
     WriteI16(packet, 14, nox);
     WriteI16(packet, 16, voc);
     WriteU16(packet, 18, co2);
-    WriteU16(packet, 20, distanceRaw);
-    packet[SensorPacketProtocol.ManualLabelOffset] = SensorPacketProtocol.ManualLabelSmokingRaw;
+    WriteU16(packet, SensorPacketProtocol.RadarDistanceOffset, distanceRaw);
+    packet[SensorPacketProtocol.ManualLabelOffset] = manualLabelRaw;
     return packet;
 }
 
@@ -762,13 +852,6 @@ static byte[] MakeLegacyPacket()
 {
     var packet = new byte[22];
     MakePacket().AsSpan(0, packet.Length).CopyTo(packet);
-    return packet;
-}
-
-static byte[] MakeManualPacket(byte rawLabel)
-{
-    var packet = MakePacket();
-    packet[SensorPacketProtocol.ManualLabelOffset] = rawLabel;
     return packet;
 }
 

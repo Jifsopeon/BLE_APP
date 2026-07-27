@@ -41,14 +41,14 @@
                        SemanticProperties.HeadingLevel="Level1" />
                 <Label Text="{Binding StatusText}"
                        FontSize="16"
-                       TextColor="{AppThemeBinding Light=#555555, Dark=#D0D0D0}" />
+                       TextColor="{StaticResource TextSecondary}" />
             </VerticalStackLayout>
 
             <Border Grid.Row="1"
-                    Stroke="#2F3136"
+                    Stroke="{StaticResource BorderColor}"
                     StrokeThickness="2"
                     Padding="16"
-                    BackgroundColor="{AppThemeBinding Light=#FAFAFA, Dark=#202124}">
+                    BackgroundColor="{StaticResource SectionBackground}">
                 <Border.StrokeShape>
                     <RoundRectangle CornerRadius="6" />
                 </Border.StrokeShape>
@@ -70,7 +70,7 @@
                                    FontAttributes="Bold" />
                             <Label Text="{Binding DeviceName}"
                                    FontSize="13"
-                                   TextColor="{AppThemeBinding Light=#666666, Dark=#C8C8C8}" />
+                                   TextColor="{StaticResource TextSecondary}" />
                         </VerticalStackLayout>
                         <Label x:Name="ConnectionStateLabel"
                                Grid.Column="1"
@@ -117,6 +117,21 @@
                                     <Grid Padding="8"
                                           ColumnDefinitions="*,Auto"
                                           RowDefinitions="Auto,Auto">
+                                        <VisualStateManager.VisualStateGroups>
+                                            <VisualStateGroup x:Name="CommonStates">
+                                                <VisualState x:Name="Normal" />
+                                                <VisualState x:Name="Selected">
+                                                    <VisualState.Setters>
+                                                        <Setter Property="BackgroundColor" Value="{StaticResource SelectionBackground}" />
+                                                    </VisualState.Setters>
+                                                </VisualState>
+                                                <VisualState x:Name="Focused">
+                                                    <VisualState.Setters>
+                                                        <Setter Property="BackgroundColor" Value="{StaticResource SelectionBackground}" />
+                                                    </VisualState.Setters>
+                                                </VisualState>
+                                            </VisualStateGroup>
+                                        </VisualStateManager.VisualStateGroups>
                                         <Label Text="{Binding Name}"
                                                FontAttributes="Bold" />
                                         <Label Grid.Column="1"
@@ -124,7 +139,7 @@
                                         <Label Grid.Row="1"
                                                Text="{Binding Id}"
                                                FontSize="12"
-                                               TextColor="{AppThemeBinding Light=#666666, Dark=#C8C8C8}"
+                                               TextColor="{StaticResource TextSecondary}"
                                                LineBreakMode="TailTruncation" />
                                         <Label Grid.Row="1"
                                                Grid.Column="1"
@@ -159,16 +174,16 @@
 
                     <Label Grid.Row="3"
                            Text="{Binding ErrorText}"
-                           TextColor="#B3261E"
+                           TextColor="{StaticResource ErrorText}"
                            LineBreakMode="WordWrap" />
                 </Grid>
             </Border>
 
             <Border Grid.Row="2"
-                    Stroke="#2F3136"
+                    Stroke="{StaticResource BorderColor}"
                     StrokeThickness="2"
                     Padding="16"
-                    BackgroundColor="{AppThemeBinding Light=#FAFAFA, Dark=#202124}">
+                    BackgroundColor="{StaticResource SectionBackground}">
                 <Border.StrokeShape>
                     <RoundRectangle CornerRadius="6" />
                 </Border.StrokeShape>
@@ -201,16 +216,16 @@
                            Grid.ColumnSpan="2"
                            Text="{Binding LoggingStatusText}"
                            FontSize="13"
-                           TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}"
+                           TextColor="{StaticResource TextSecondary}"
                            LineBreakMode="WordWrap" />
                 </Grid>
             </Border>
 
             <Border Grid.Row="3"
-                    Stroke="#2F3136"
+                    Stroke="{StaticResource BorderColor}"
                     StrokeThickness="2"
                     Padding="16"
-                    BackgroundColor="{AppThemeBinding Light=#FAFAFA, Dark=#202124}">
+                    BackgroundColor="{StaticResource SectionBackground}">
                 <Border.StrokeShape>
                     <RoundRectangle CornerRadius="6" />
                 </Border.StrokeShape>
@@ -228,7 +243,7 @@
                                    FontAttributes="Bold" />
                             <Label Text="{Binding PacketText}"
                                    FontSize="13"
-                                   TextColor="{AppThemeBinding Light=#666666, Dark=#C8C8C8}" />
+                                   TextColor="{StaticResource TextSecondary}" />
                         </VerticalStackLayout>
                         <VerticalStackLayout Grid.Column="1"
                                              HorizontalOptions="End"
@@ -236,7 +251,7 @@
                             <Label Text="Last update"
                                    FontSize="12"
                                    HorizontalTextAlignment="End"
-                                   TextColor="{AppThemeBinding Light=#666666, Dark=#C8C8C8}" />
+                                   TextColor="{StaticResource TextSecondary}" />
                             <Label Text="{Binding LatestUpdateText}"
                                    FontSize="18"
                                    FontAttributes="Bold"
@@ -256,24 +271,24 @@
                         </CollectionView.ItemsLayout>
                         <CollectionView.ItemTemplate>
                             <DataTemplate x:DataType="models:SensorMetric">
-                                <Border Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
+                                <Border Stroke="{StaticResource BorderColor}"
                                         StrokeThickness="1"
                                         Padding="12"
-                                        BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#151618}">
+                                        BackgroundColor="{StaticResource CardBackground}">
                                     <Border.StrokeShape>
                                         <RoundRectangle CornerRadius="6" />
                                     </Border.StrokeShape>
                                     <VerticalStackLayout Spacing="4">
                                         <Label Text="{Binding Name}"
                                                FontSize="13"
-                                               TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
+                                               TextColor="{StaticResource TextSecondary}" />
                                         <Label Text="{Binding Value}"
                                                FontSize="24"
                                                FontAttributes="Bold"
                                                LineBreakMode="TailTruncation" />
                                         <Label Text="{Binding Unit}"
                                                FontSize="12"
-                                               TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
+                                               TextColor="{StaticResource TextSecondary}" />
                                     </VerticalStackLayout>
                                 </Border>
                             </DataTemplate>
@@ -286,23 +301,23 @@
                                 AlignItems="Stretch"
                                 JustifyContent="Start"
                                 AlignContent="Stretch">
-                        <Border Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
+                        <Border Stroke="{StaticResource BorderColor}"
                                 StrokeThickness="1"
                                 Padding="12"
                                 Margin="0,0,10,10"
                                 FlexLayout.Basis="320"
                                 FlexLayout.Grow="1"
-                                BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#151618}">
+                                BackgroundColor="{StaticResource CardBackground}">
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="6" />
                             </Border.StrokeShape>
                             <VerticalStackLayout Spacing="8">
                                 <Label Text="Set Manual Label"
                                        FontSize="13"
-                                       TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
+                                       TextColor="{StaticResource TextSecondary}" />
                                 <Label Text="{Binding ManualLabelPendingText}"
                                        FontSize="12"
-                                       TextColor="{AppThemeBinding Light=#666666, Dark=#C8C8C8}" />
+                                       TextColor="{StaticResource TextSecondary}" />
                                 <Grid ColumnDefinitions="*,*"
                                       ColumnSpacing="8">
                                     <Button Text="No Smoking"
@@ -317,42 +332,43 @@
                                 </Grid>
                                 <Label Text="{Binding ManualLabelText, StringFormat='Confirmed: {0}'}"
                                        FontSize="12"
-                                       TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
+                                       TextColor="{StaticResource TextSecondary}" />
                             </VerticalStackLayout>
                         </Border>
 
-                        <Border Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
+                        <Border Stroke="{StaticResource BorderColor}"
                                 StrokeThickness="1"
                                 Padding="12"
                                 Margin="0,0,10,10"
                                 FlexLayout.Basis="320"
                                 FlexLayout.Grow="1"
-                                BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#151618}">
+                                BackgroundColor="{StaticResource CardBackground}">
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="6" />
                             </Border.StrokeShape>
                             <VerticalStackLayout Spacing="8">
                                 <Label Text="Manual Label"
                                        FontSize="13"
-                                       TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
+                                       TextColor="{StaticResource TextSecondary}" />
                                 <Label Text="{Binding ManualLabelText}"
                                        FontSize="24"
                                        FontAttributes="Bold"
                                        LineBreakMode="TailTruncation" />
                                 <Label Text=""
                                        FontSize="12"
-                                       TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
+                                       TextColor="{StaticResource TextSecondary}" />
                             </VerticalStackLayout>
                         </Border>
+
                     </FlexLayout>
                 </Grid>
             </Border>
 
             <Border Grid.Row="4"
-                    Stroke="#2F3136"
+                    Stroke="{StaticResource BorderColor}"
                     StrokeThickness="2"
                     Padding="16"
-                    BackgroundColor="{AppThemeBinding Light=#FAFAFA, Dark=#202124}">
+                    BackgroundColor="{StaticResource SectionBackground}">
                 <Border.StrokeShape>
                     <RoundRectangle CornerRadius="6" />
                 </Border.StrokeShape>
@@ -368,7 +384,7 @@
                         <Label Text="Waiting for sensor samples"
                                FontSize="13"
                                IsVisible="{Binding IsWaitingForReading}"
-                               TextColor="{AppThemeBinding Light=#666666, Dark=#C8C8C8}" />
+                               TextColor="{StaticResource TextSecondary}" />
                     </VerticalStackLayout>
                     <VerticalStackLayout Grid.Row="1"
                                          x:Name="GraphPanel"
@@ -387,10 +403,10 @@
                             </Grid.ColumnDefinitions>
 
                             <Border x:Name="PmChartCard"
-                                    Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
+                                    Stroke="{StaticResource BorderColor}"
                                     StrokeThickness="1"
                                     Padding="12"
-                                    BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#151618}">
+                                    BackgroundColor="{StaticResource CardBackground}">
                                 <Border.StrokeShape>
                                     <RoundRectangle CornerRadius="6" />
                                 </Border.StrokeShape>
@@ -407,7 +423,7 @@
                                         <Label Grid.Column="1"
                                                Text="µg/m³"
                                                FontSize="12"
-                                               TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
+                                               TextColor="{StaticResource TextSecondary}" />
                                     </Grid>
                                     <FlexLayout Grid.Row="1"
                                                 Wrap="Wrap"
@@ -522,6 +538,13 @@
                                     </FlexLayout>
                                     <lvc:CartesianChart x:Name="PmChart"
                                                         Grid.Row="2"
+                                                        BackgroundColor="{StaticResource CardBackground}"
+                                                        DrawMargin="{Binding ChartDrawMargin}"
+                                                        DrawMarginFrame="{Binding ChartDrawMarginFrame}"
+                                                        TooltipBackgroundPaint="{Binding ChartTooltipBackgroundPaint}"
+                                                        TooltipTextPaint="{Binding ChartTooltipTextPaint}"
+                                                        LegendBackgroundPaint="{Binding ChartLegendBackgroundPaint}"
+                                                        LegendTextPaint="{Binding ChartLegendTextPaint}"
                                                         Series="{Binding PmSeries}"
                                                         XAxes="{Binding PmXAxes}"
                                                         YAxes="{Binding PmYAxes}"
@@ -535,10 +558,10 @@
 
                             <Border x:Name="VocNoxChartCard"
                                     Grid.Column="1"
-                                    Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
+                                    Stroke="{StaticResource BorderColor}"
                                     StrokeThickness="1"
                                     Padding="12"
-                                    BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#151618}">
+                                    BackgroundColor="{StaticResource CardBackground}">
                                 <Border.StrokeShape>
                                     <RoundRectangle CornerRadius="6" />
                                 </Border.StrokeShape>
@@ -555,7 +578,7 @@
                                         <Label Grid.Column="1"
                                                Text="index"
                                                FontSize="12"
-                                               TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
+                                               TextColor="{StaticResource TextSecondary}" />
                                     </Grid>
                                     <FlexLayout Grid.Row="1"
                                                 Wrap="Wrap"
@@ -618,6 +641,13 @@
                                     </FlexLayout>
                                     <lvc:CartesianChart x:Name="VocNoxChart"
                                                         Grid.Row="2"
+                                                        BackgroundColor="{StaticResource CardBackground}"
+                                                        DrawMargin="{Binding ChartDrawMargin}"
+                                                        DrawMarginFrame="{Binding ChartDrawMarginFrame}"
+                                                        TooltipBackgroundPaint="{Binding ChartTooltipBackgroundPaint}"
+                                                        TooltipTextPaint="{Binding ChartTooltipTextPaint}"
+                                                        LegendBackgroundPaint="{Binding ChartLegendBackgroundPaint}"
+                                                        LegendTextPaint="{Binding ChartLegendTextPaint}"
                                                         Series="{Binding VocNoxSeries}"
                                                         XAxes="{Binding VocNoxXAxes}"
                                                         YAxes="{Binding VocNoxYAxes}"
@@ -631,10 +661,10 @@
 
                             <Border x:Name="HumidityChartCard"
                                     Grid.Row="1"
-                                    Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
+                                    Stroke="{StaticResource BorderColor}"
                                     StrokeThickness="1"
                                     Padding="12"
-                                    BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#151618}">
+                                    BackgroundColor="{StaticResource CardBackground}">
                                 <Border.StrokeShape>
                                     <RoundRectangle CornerRadius="6" />
                                 </Border.StrokeShape>
@@ -662,11 +692,18 @@
                                         <Label Grid.Column="1"
                                                Text="% RH"
                                                FontSize="12"
-                                               TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
+                                               TextColor="{StaticResource TextSecondary}" />
                                     </Grid>
                                     <BoxView Grid.Row="1" HeightRequest="22" Opacity="0" />
                                     <lvc:CartesianChart x:Name="HumidityChart"
                                                         Grid.Row="2"
+                                                        BackgroundColor="{StaticResource CardBackground}"
+                                                        DrawMargin="{Binding ChartDrawMargin}"
+                                                        DrawMarginFrame="{Binding ChartDrawMarginFrame}"
+                                                        TooltipBackgroundPaint="{Binding ChartTooltipBackgroundPaint}"
+                                                        TooltipTextPaint="{Binding ChartTooltipTextPaint}"
+                                                        LegendBackgroundPaint="{Binding ChartLegendBackgroundPaint}"
+                                                        LegendTextPaint="{Binding ChartLegendTextPaint}"
                                                         Series="{Binding HumiditySeries}"
                                                         XAxes="{Binding HumidityXAxes}"
                                                         YAxes="{Binding HumidityYAxes}"
@@ -681,10 +718,10 @@
                             <Border x:Name="TemperatureChartCard"
                                     Grid.Row="1"
                                     Grid.Column="1"
-                                    Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
+                                    Stroke="{StaticResource BorderColor}"
                                     StrokeThickness="1"
                                     Padding="12"
-                                    BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#151618}">
+                                    BackgroundColor="{StaticResource CardBackground}">
                                 <Border.StrokeShape>
                                     <RoundRectangle CornerRadius="6" />
                                 </Border.StrokeShape>
@@ -712,11 +749,18 @@
                                         <Label Grid.Column="1"
                                                Text="°C"
                                                FontSize="12"
-                                               TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
+                                               TextColor="{StaticResource TextSecondary}" />
                                     </Grid>
                                     <BoxView Grid.Row="1" HeightRequest="22" Opacity="0" />
                                     <lvc:CartesianChart x:Name="TemperatureChart"
                                                         Grid.Row="2"
+                                                        BackgroundColor="{StaticResource CardBackground}"
+                                                        DrawMargin="{Binding ChartDrawMargin}"
+                                                        DrawMarginFrame="{Binding ChartDrawMarginFrame}"
+                                                        TooltipBackgroundPaint="{Binding ChartTooltipBackgroundPaint}"
+                                                        TooltipTextPaint="{Binding ChartTooltipTextPaint}"
+                                                        LegendBackgroundPaint="{Binding ChartLegendBackgroundPaint}"
+                                                        LegendTextPaint="{Binding ChartLegendTextPaint}"
                                                         Series="{Binding TemperatureSeries}"
                                                         XAxes="{Binding TemperatureXAxes}"
                                                         YAxes="{Binding TemperatureYAxes}"
@@ -730,10 +774,10 @@
 
                             <Border x:Name="Co2ChartCard"
                                     Grid.Row="2"
-                                    Stroke="{AppThemeBinding Light=#D0D4DA, Dark=#3A3D42}"
+                                    Stroke="{StaticResource BorderColor}"
                                     StrokeThickness="1"
                                     Padding="12"
-                                    BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#151618}">
+                                    BackgroundColor="{StaticResource CardBackground}">
                                 <Border.StrokeShape>
                                     <RoundRectangle CornerRadius="6" />
                                 </Border.StrokeShape>
@@ -761,11 +805,18 @@
                                         <Label Grid.Column="1"
                                                Text="ppm"
                                                FontSize="12"
-                                               TextColor="{AppThemeBinding Light=#59616B, Dark=#B9C0C8}" />
+                                               TextColor="{StaticResource TextSecondary}" />
                                     </Grid>
                                     <BoxView Grid.Row="1" HeightRequest="22" Opacity="0" />
                                     <lvc:CartesianChart x:Name="Co2Chart"
                                                         Grid.Row="2"
+                                                        BackgroundColor="{StaticResource CardBackground}"
+                                                        DrawMargin="{Binding ChartDrawMargin}"
+                                                        DrawMarginFrame="{Binding ChartDrawMarginFrame}"
+                                                        TooltipBackgroundPaint="{Binding ChartTooltipBackgroundPaint}"
+                                                        TooltipTextPaint="{Binding ChartTooltipTextPaint}"
+                                                        LegendBackgroundPaint="{Binding ChartLegendBackgroundPaint}"
+                                                        LegendTextPaint="{Binding ChartLegendTextPaint}"
                                                         Series="{Binding Co2Series}"
                                                         XAxes="{Binding Co2XAxes}"
                                                         YAxes="{Binding Co2YAxes}"

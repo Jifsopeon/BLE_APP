@@ -43,7 +43,7 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
 #endif
     private const ulong IncompatiblePacketWarningLimit = 5;
     private const ulong IncompatiblePacketWarningInterval = 100;
-    private const int AndroidRequestedMtu = 247;
+    private const int AndroidRequestedMtu = 32;
     private const int RequiredNotificationPayloadLength = SensorPacketDecoder.PacketLength;
 
     private readonly IBluetoothScanner _scanner;

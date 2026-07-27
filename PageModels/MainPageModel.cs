@@ -7,6 +7,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LiveChartsCore;
 using LiveChartsCore.Defaults;
+using LiveChartsCore.Measure;
 using LiveChartsCore.SkiaSharpView;
 using LiveChartsCore.SkiaSharpView.Painting;
 using Microsoft.Maui.ApplicationModel;
@@ -29,6 +30,9 @@ public sealed partial class MainPageModel : ObservableObject
     private static readonly SKColor HumidityColor = SKColors.RoyalBlue;
     private static readonly SKColor TemperatureColor = SKColors.OrangeRed;
     private static readonly SKColor Co2Color = SKColors.ForestGreen;
+    private static readonly SKColor ChartSurfaceColor = SKColor.Parse("#FFFFFF");
+    private static readonly SKColor ChartTextColor = SKColor.Parse("#59635A");
+    private static readonly SKColor ChartGridLineColor = SKColor.Parse("#D7DED5");
 
     private readonly IBluetoothSensorService _bluetooth;
     private readonly ISensorLogService _sensorLog;
@@ -197,6 +201,22 @@ public sealed partial class MainPageModel : ObservableObject
     public ISeries[] TemperatureSeries { get; }
 
     public ISeries[] Co2Series { get; }
+
+    public Margin ChartDrawMargin { get; } = new(72, 12, 18, 36);
+
+    public DrawMarginFrame ChartDrawMarginFrame { get; } = new()
+    {
+        Fill = new SolidColorPaint(ChartSurfaceColor),
+        Stroke = new SolidColorPaint(ChartGridLineColor, 1)
+    };
+
+    public SolidColorPaint ChartTooltipBackgroundPaint { get; } = new(ChartSurfaceColor);
+
+    public SolidColorPaint ChartTooltipTextPaint { get; } = new(ChartTextColor);
+
+    public SolidColorPaint ChartLegendBackgroundPaint { get; } = new(ChartSurfaceColor);
+
+    public SolidColorPaint ChartLegendTextPaint { get; } = new(ChartTextColor);
 
     public Axis[] PmXAxes { get; } = CreateElapsedSecondsAxes();
 
@@ -557,7 +577,7 @@ public sealed partial class MainPageModel : ObservableObject
             SetMetric("NOx", Format(reading.Nox, "0.0"));
             SetMetric("VOC", Format(reading.Voc, "0.0"));
             SetMetric("CO2", reading.Co2?.ToString() ?? "--");
-            SetMetric("Distance", reading.DistanceMetres.ToString("0.###"));
+            SetMetric("Distance", reading.DistanceMetres.ToString("0.00"));
             UpdateManualLabel(reading.ManualLabel);
         });
     }
@@ -811,10 +831,29 @@ public sealed partial class MainPageModel : ObservableObject
     }
 
     private static Axis[] CreateElapsedSecondsAxes()
-        => [new Axis { MinLimit = 0, MaxLimit = ChartWindowSeconds, Labeler = FormatElapsedAxisLabel }];
+        =>
+        [
+            new Axis
+            {
+                MinLimit = 0,
+                MaxLimit = ChartWindowSeconds,
+                Labeler = FormatElapsedAxisLabel,
+                LabelsPaint = new SolidColorPaint(ChartTextColor),
+                SeparatorsPaint = new SolidColorPaint(ChartGridLineColor, 1)
+            }
+        ];
 
     private static Axis[] CreateZeroMinAxes()
-        => [new Axis { MinLimit = 0, MaxLimit = null }];
+        =>
+        [
+            new Axis
+            {
+                MinLimit = 0,
+                MaxLimit = null,
+                LabelsPaint = new SolidColorPaint(ChartTextColor),
+                SeparatorsPaint = new SolidColorPaint(ChartGridLineColor, 1)
+            }
+        ];
 
     private void TrimChartCollections(double latestElapsedSeconds)
     {
