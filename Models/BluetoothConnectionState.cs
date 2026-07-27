@@ -16,5 +16,6 @@ public enum BluetoothConnectionState
     Disconnecting,
     Disconnected,
     Reconnecting,
+    Suspended,
     Error
 }

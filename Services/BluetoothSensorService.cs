@@ -45,12 +45,24 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
     private const ulong IncompatiblePacketWarningInterval = 100;
     private const int AndroidRequestedMtu = 32;
     private const int RequiredNotificationPayloadLength = SensorPacketDecoder.PacketLength;
+    private const byte ClientHeartbeatCommand = 0x07;
+    private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan ReconnectSettleDelay = TimeSpan.FromMilliseconds(750);
+    private static readonly TimeSpan[] ReconnectBackoff =
+    [
+        TimeSpan.FromSeconds(1),
+        TimeSpan.FromSeconds(2),
+        TimeSpan.FromSeconds(4),
+        TimeSpan.FromSeconds(8)
+    ];
 
     private readonly IBluetoothScanner _scanner;
     private readonly SensorPacketDecoder _decoder;
     private readonly ISensorLogService _sensorLog;
     private readonly ILogger<BluetoothSensorService> _logger;
     private readonly SemaphoreSlim _connectionGate = new(1, 1);
+    private readonly SemaphoreSlim _reconnectGate = new(1, 1);
+    private readonly SemaphoreSlim _commandWriteGate = new(1, 1);
     private readonly object _scanGate = new();
     private readonly Dictionary<string, IBluetoothRemoteDevice> _devices = [];
 #if !WINDOWS
@@ -74,6 +86,11 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
     private ulong _validReadingLogCount;
     private ulong _incompatiblePacketWarningCount;
     private bool _userDisconnectRequested;
+    private bool _appForeground = true;
+    private bool _cleanupInProgress;
+    private int _recoveryInProgress;
+    private CancellationTokenSource? _heartbeatCts;
+    private Task? _heartbeatTask;
     private bool _disposed;
 
 #if WINDOWS
@@ -276,7 +293,7 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
 #if WINDOWS
             SetState(BluetoothConnectionState.Connecting);
             Log($"Connection attempt started: {device.Name} ({device.Id}).");
-            await ConnectWindowsNativeAsync(device, cancellationToken).ConfigureAwait(false);
+            await ConnectWindowsNativeAsync(device, generation, cancellationToken).ConfigureAwait(false);
             LogLifecycle("Connection ready", "ConnectWindowsNativeAsync", device.Id, generation);
             return;
 #else
@@ -398,17 +415,14 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
             Log("[ANDROID-BLE] CCCD enabled");
 #endif
 
-            await RunGattOperationAsync("Command write: WriteValueAsync", device, generation, async () =>
-            {
-                await _commandCharacteristic.WriteValueAsync(new byte[] { 0x01 }, timeout: TimeSpan.FromSeconds(5), cancellationToken: cancellationToken)
-                    .ConfigureAwait(false);
-            }).ConfigureAwait(false);
+            await WriteCommandPayloadAsync("Start streaming command", new byte[] { 0x01 }, generation, cancellationToken).ConfigureAwait(false);
             Log("Start streaming command sent.");
 #if ANDROID
             Log("[ANDROID-BLE] Start command written");
 #endif
 
             SetState(BluetoothConnectionState.Connected);
+            StartHeartbeat(generation);
 #endif
         }
         catch (Exception ex)
@@ -456,34 +470,92 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
 
     public async Task ReconnectAsync(CancellationToken cancellationToken)
     {
-        var device = _currentDevice;
-        if (device is null)
+        await _reconnectGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            throw new InvalidOperationException("No previous device is available for reconnect.");
-        }
-
-        var deviceId = device.Id;
-        var reconnectGeneration = Volatile.Read(ref _connectionGeneration);
-        LogLifecycle("Reconnect start", "ReconnectAsync", deviceId, reconnectGeneration);
-        for (var attempt = 1; attempt <= 3 && !_userDisconnectRequested; attempt++)
-        {
-            SetState(BluetoothConnectionState.Reconnecting);
-            var delay = TimeSpan.FromSeconds(attempt * 2);
-            Log($"Reconnection attempt {attempt} in {delay.TotalSeconds:0}s.");
-            await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
-
+            string deviceId;
+            await _connectionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                await ConnectAsync(deviceId, cancellationToken).ConfigureAwait(false);
-                return;
+                var device = _currentDevice;
+                if (device is null)
+                {
+                    throw new InvalidOperationException("No previous device is available for reconnect.");
+                }
+
+                deviceId = device.Id;
+                var generation = Interlocked.Increment(ref _connectionGeneration);
+                LogLifecycle("Reconnect cleanup start", "ReconnectAsync", deviceId, generation);
+                SetState(BluetoothConnectionState.Reconnecting);
+                await CleanupConnectionAsync(skipDisconnect: false, reason: "ReconnectCleanup", generation, CancellationToken.None).ConfigureAwait(false);
             }
-            catch (Exception ex) when (attempt < 3)
+            finally
             {
-                Log($"Reconnect attempt {attempt} failed: {ex.Message}", ex);
+                _connectionGate.Release();
             }
+
+            await Task.Delay(ReconnectSettleDelay, cancellationToken).ConfigureAwait(false);
+            LogLifecycle("Reconnect start", "ReconnectAsync", deviceId, Volatile.Read(ref _connectionGeneration));
+            for (var attempt = 1; attempt <= ReconnectBackoff.Length && !_userDisconnectRequested && _appForeground; attempt++)
+            {
+                SetState(BluetoothConnectionState.Reconnecting);
+                var delay = ReconnectBackoff[attempt - 1];
+                Log($"Reconnection attempt {attempt} in {delay.TotalSeconds:0}s.");
+                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+
+                try
+                {
+                    await ConnectAsync(deviceId, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                catch (Exception ex) when (attempt < ReconnectBackoff.Length)
+                {
+                    Log($"Reconnect attempt {attempt} failed: {ex.Message}", ex);
+                }
+            }
+
+            SetState(BluetoothConnectionState.Disconnected);
+        }
+        finally
+        {
+            Volatile.Write(ref _recoveryInProgress, 0);
+            _reconnectGate.Release();
+        }
+    }
+
+    public async Task SuspendAsync(CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        await _connectionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            _appForeground = false;
+            var generation = Interlocked.Increment(ref _connectionGeneration);
+            LogLifecycle("Suspend cleanup start", "AppSuspend", _currentDevice?.Id, generation);
+            SetState(BluetoothConnectionState.Suspended);
+            await CleanupConnectionAsync(skipDisconnect: false, reason: "AppSuspend", generation, CancellationToken.None).ConfigureAwait(false);
+            SetState(BluetoothConnectionState.Suspended);
+            Log("BLE state: Suspended");
+        }
+        finally
+        {
+            _connectionGate.Release();
+        }
+    }
+
+    public async Task ResumeAsync(CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        _appForeground = true;
+        if (_currentDevice is null)
+        {
+            SetState(BluetoothConnectionState.Disconnected);
+            return;
         }
 
-        SetState(BluetoothConnectionState.Disconnected);
+        SetState(BluetoothConnectionState.Reconnecting);
+        Log("BLE state: Reconnecting");
+        await ReconnectAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async ValueTask DisposeAsync()
@@ -499,9 +571,113 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
         await _sensorLog.StopAndSaveAsync(LogStopReason.Shutdown, Volatile.Read(ref _connectionGeneration), CancellationToken.None).ConfigureAwait(false);
         await _scanner.DisposeAsync().ConfigureAwait(false);
         _connectionGate.Dispose();
+        _reconnectGate.Dispose();
+        _commandWriteGate.Dispose();
 #if !WINDOWS
         _gattOperationGate.Dispose();
 #endif
+    }
+
+    private void StartHeartbeat(long generation)
+    {
+        StopHeartbeat();
+        if (!_appForeground || _userDisconnectRequested)
+        {
+            return;
+        }
+
+        _heartbeatCts = new CancellationTokenSource();
+        var token = _heartbeatCts.Token;
+        _heartbeatTask = Task.Run(async () =>
+        {
+            try
+            {
+                await SendHeartbeatAsync(generation, token).ConfigureAwait(false);
+                while (!token.IsCancellationRequested)
+                {
+                    await Task.Delay(HeartbeatInterval, token).ConfigureAwait(false);
+                    await SendHeartbeatAsync(generation, token).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+            }
+        }, CancellationToken.None);
+        Log("BLE heartbeat started.");
+    }
+
+    private void StopHeartbeat()
+    {
+        var cts = Interlocked.Exchange(ref _heartbeatCts, null);
+        if (cts is null)
+        {
+            return;
+        }
+
+        try
+        {
+            cts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        finally
+        {
+            cts.Dispose();
+        }
+
+        _heartbeatTask = null;
+        Log("BLE heartbeat stopped.");
+    }
+
+    private async Task SendHeartbeatAsync(long generation, CancellationToken cancellationToken)
+    {
+        if (!_appForeground || _userDisconnectRequested || generation != Volatile.Read(ref _connectionGeneration))
+        {
+            return;
+        }
+
+        try
+        {
+            await WriteCommandPayloadAsync("Heartbeat command", new[] { ClientHeartbeatCommand }, generation, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || !_appForeground || _userDisconnectRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            Log($"BLE heartbeat failed: {ex.Message}", ex);
+            RequestConnectionRecovery("HeartbeatFailure");
+        }
+    }
+
+    private void RequestConnectionRecovery(string reason)
+    {
+        if (_disposed || _userDisconnectRequested || !_appForeground)
+        {
+            return;
+        }
+
+        if (Interlocked.Exchange(ref _recoveryInProgress, 1) == 1)
+        {
+            Log($"BLE recovery already in progress; ignored duplicate request from {reason}.");
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ReconnectAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Volatile.Write(ref _recoveryInProgress, 0);
+                Log($"Automatic recovery failed after {reason}: {ex.Message}", ex);
+                SetState(BluetoothConnectionState.Disconnected);
+                UnexpectedlyDisconnected?.Invoke(this, EventArgs.Empty);
+            }
+        });
     }
 
     private void OnDeviceListChanged(object? sender, DeviceListChangedEventArgs e)
@@ -614,36 +790,53 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
         var payload = new[] { SensorPacketProtocol.SetManualLabelCommand, SensorPacketProtocol.EncodeManualLabel(label) };
         var generation = Volatile.Read(ref _connectionGeneration);
 
-#if WINDOWS
-        if (_windowsCommandCharacteristic is null)
-        {
-            throw new InvalidOperationException("Manual label command is unavailable until the command characteristic is discovered.");
-        }
-
-        using var writer = new DataWriter();
-        writer.WriteBytes(payload);
-        var status = await RunConnectionStepAsync(
-            "Windows native API: Manual label WriteValueAsync",
-            _currentDevice ?? throw new InvalidOperationException("No active BLE device."),
-            async () => await _windowsCommandCharacteristic.WriteValueAsync(writer.DetachBuffer(), GattWriteOption.WriteWithResponse).AsTask(cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
-        Log($"Windows native Manual label command write result: {status}; Requested={SensorPacketProtocol.FormatManualLabel(label)}; Raw={payload[1]}.");
-        if (status != GattCommunicationStatus.Success)
-        {
-            throw new InvalidOperationException($"Manual label command write returned {status}.");
-        }
-#else
-        if (_currentDevice is null || _commandCharacteristic is null)
-        {
-            throw new InvalidOperationException("Manual label command is unavailable until the command characteristic is discovered.");
-        }
-
-        await RunGattOperationAsync("Manual label command: WriteValueAsync", _currentDevice, generation, async () =>
-        {
-            await _commandCharacteristic.WriteValueAsync(payload, timeout: TimeSpan.FromSeconds(5), cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
-        }).ConfigureAwait(false);
+        await WriteCommandPayloadAsync("Manual label command", payload, generation, cancellationToken).ConfigureAwait(false);
         Log($"Manual label command written. Requested={SensorPacketProtocol.FormatManualLabel(label)}; Raw={payload[1]}.");
+    }
+
+    private async Task WriteCommandPayloadAsync(string operation, byte[] payload, long generation, CancellationToken cancellationToken)
+    {
+        await _commandWriteGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (generation != Volatile.Read(ref _connectionGeneration))
+            {
+                throw new OperationCanceledException("BLE command write cancelled because the connection generation changed.", cancellationToken);
+            }
+
+#if WINDOWS
+            if (_windowsCommandCharacteristic is null)
+            {
+                throw new InvalidOperationException("Command characteristic is unavailable until discovery completes.");
+            }
+
+            using var writer = new DataWriter();
+            writer.WriteBytes(payload);
+            var status = await RunConnectionStepAsync(
+                $"Windows native API: {operation} WriteValueAsync",
+                _currentDevice ?? throw new InvalidOperationException("No active BLE device."),
+                async () => await _windowsCommandCharacteristic.WriteValueAsync(writer.DetachBuffer(), GattWriteOption.WriteWithResponse).AsTask(cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
+            if (status != GattCommunicationStatus.Success)
+            {
+                throw new InvalidOperationException($"{operation} write returned {status}.");
+            }
+#else
+            if (_currentDevice is null || _commandCharacteristic is null)
+            {
+                throw new InvalidOperationException("Command characteristic is unavailable until discovery completes.");
+            }
+
+            await RunGattOperationAsync($"{operation}: WriteValueAsync", _currentDevice, generation, async () =>
+            {
+                await _commandCharacteristic.WriteValueAsync(payload, timeout: TimeSpan.FromSeconds(5), cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
+            }).ConfigureAwait(false);
 #endif
+        }
+        finally
+        {
+            _commandWriteGate.Release();
+        }
     }
 
 #if ANDROID
@@ -685,7 +878,7 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
         _ = _sensorLog.StopAndSaveAsync(LogStopReason.UnexpectedDisconnect, Volatile.Read(ref _connectionGeneration), CancellationToken.None);
         SetState(BluetoothConnectionState.Disconnected);
         Log("Device disconnected unexpectedly.");
-        UnexpectedlyDisconnected?.Invoke(this, EventArgs.Empty);
+        RequestConnectionRecovery("UnexpectedDisconnection");
     }
 
     private IReadOnlyList<DiscoveredSensorDevice> SnapshotDevices(string? filter)
@@ -732,27 +925,56 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
             return;
         }
 
+        StopHeartbeat();
+        CanSetManualLabel = false;
+        _cleanupInProgress = true;
+
+        try
+        {
 #if WINDOWS
-        await CleanupWindowsNativeConnectionAsync(disableNotifications: !skipDisconnect, cancellationToken).ConfigureAwait(false);
+            await CleanupWindowsNativeConnectionAsync(disableNotifications: !skipDisconnect, cancellationToken).ConfigureAwait(false);
 #endif
 
 #if !WINDOWS
         if (_sensorCharacteristic is not null)
         {
-            _sensorCharacteristic.ValueUpdated -= OnSensorValueUpdated;
-            if (_sensorCharacteristic.IsListening)
+            try
             {
-                await _sensorCharacteristic.StopListeningAsync(SubscribeTimeout, cancellationToken).ConfigureAwait(false);
+                _sensorCharacteristic.ValueUpdated -= OnSensorValueUpdated;
+                if (_sensorCharacteristic.IsListening)
+                {
+                    await _sensorCharacteristic.StopListeningAsync(SubscribeTimeout, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"Notification cleanup failed during {reason}: {ex.Message}", ex);
             }
         }
 
         if (_currentDevice is not null)
         {
-            _currentDevice.UnexpectedDisconnection -= OnUnexpectedDisconnection;
-            if (!skipDisconnect && _currentDevice.IsConnected)
+            try
             {
-                _currentDevice.IgnoreNextUnexpectedDisconnection = true;
-                await _currentDevice.DisconnectIfNeededAsync(ConnectTimeout, cancellationToken).ConfigureAwait(false);
+                _currentDevice.UnexpectedDisconnection -= OnUnexpectedDisconnection;
+                if (!skipDisconnect && _currentDevice.IsConnected)
+                {
+                    _currentDevice.IgnoreNextUnexpectedDisconnection = true;
+                    await _currentDevice.DisconnectIfNeededAsync(ConnectTimeout, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"Device disconnect cleanup failed during {reason}: {ex.Message}", ex);
+            }
+
+            try
+            {
+                await _currentDevice.ClearServicesAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Log($"Service cache cleanup failed during {reason}: {ex.Message}", ex);
             }
         }
 
@@ -767,7 +989,12 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
         }
 #endif
         _lastSequenceNumber = null;
-        CanSetManualLabel = false;
+        Log("BLE cleanup completed.");
+        }
+        finally
+        {
+            _cleanupInProgress = false;
+        }
     }
 
     private void TrackSequence(ushort sequenceNumber)
@@ -913,7 +1140,7 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
         => LogLifecycle(action, reason, deviceId, generation, Volatile.Read(ref _scanGeneration), caller);
 
     private void LogLifecycle(string action, string reason, string? deviceId, long connectionGeneration, long scanGeneration, [CallerMemberName] string caller = "")
-        => Log($"[BLE-LIFECYCLE] {action}; Reason={reason}; State={State}; DeviceId={deviceId ?? "<none>"}; ConnectionGeneration={connectionGeneration}; ScanGeneration={scanGeneration}; AppScanActive={IsAppScanActive}; PlatformScannerRunning={_scanner.IsRunning}; ThreadId={Environment.CurrentManagedThreadId}; CallSite={caller}.");
+        => Log($"[BLE-LIFECYCLE] {action}; Reason={reason}; State={State}; DeviceId={deviceId ?? "<none>"}; ConnectionGeneration={connectionGeneration}; ScanGeneration={scanGeneration}; CleanupInProgress={_cleanupInProgress}; AppScanActive={IsAppScanActive}; PlatformScannerRunning={_scanner.IsRunning}; ThreadId={Environment.CurrentManagedThreadId}; CallSite={caller}.");
 
     private T RunConnectionStep<T>(string operation, IBluetoothRemoteDevice device, Func<T> action)
     {
@@ -1195,11 +1422,12 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
     }
 
 #if WINDOWS
-    private async Task ConnectWindowsNativeAsync(IBluetoothRemoteDevice device, CancellationToken cancellationToken)
+    private async Task ConnectWindowsNativeAsync(IBluetoothRemoteDevice device, long generation, CancellationToken cancellationToken)
     {
         Log("Windows BLE connection owner: native WinRT GATT. Laerdal ConnectAsync is not used on Windows.");
 
         var address = RunConnectionStep("Windows native address parse", device, () => ParseBluetoothAddress(device.Id));
+        EnsureActiveConnectionAttempt(generation, cancellationToken);
 
         _windowsNativeDevice = await RunConnectionStepAsync(
             "Windows native API: BluetoothLEDevice.FromBluetoothAddressAsync",
@@ -1210,15 +1438,17 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
                 var nativeDevice = await BluetoothLEDevice.FromBluetoothAddressAsync(address).AsTask(cancellationToken).ConfigureAwait(false);
                 return nativeDevice ?? throw new InvalidOperationException($"BluetoothLEDevice.FromBluetoothAddressAsync returned null for {device.Id}.");
             }).ConfigureAwait(false);
+        EnsureActiveConnectionAttempt(generation, cancellationToken);
 
         _windowsNativeDevice.ConnectionStatusChanged += OnWindowsNativeConnectionStatusChanged;
-        Log($"Windows native device created. {DescribeNativeDevice(_windowsNativeDevice)}");
+        Log($"Windows native device created. {DescribeNativeDeviceSafe(_windowsNativeDevice)}");
 
         var accessStatus = await RunConnectionStepAsync(
             "Windows native API: BluetoothLEDevice.RequestAccessAsync",
             device,
             async () => await _windowsNativeDevice.RequestAccessAsync().AsTask(cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
-        Log($"Windows native access status: {accessStatus}. {DescribeNativeDevice(_windowsNativeDevice)}");
+        EnsureActiveConnectionAttempt(generation, cancellationToken);
+        Log($"Windows native access status: {accessStatus}. {DescribeNativeDeviceSafe(_windowsNativeDevice)}");
 
         if (accessStatus != DeviceAccessStatus.Allowed)
         {
@@ -1233,6 +1463,7 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
                 var session = await GattSession.FromDeviceIdAsync(_windowsNativeDevice.BluetoothDeviceId).AsTask(cancellationToken).ConfigureAwait(false);
                 return session ?? throw new InvalidOperationException($"GattSession.FromDeviceIdAsync returned null for {device.Id}.");
             }).ConfigureAwait(false);
+        EnsureActiveConnectionAttempt(generation, cancellationToken);
         _windowsGattSession.SessionStatusChanged += OnWindowsGattSessionStatusChanged;
         if (_windowsGattSession.CanMaintainConnection)
         {
@@ -1246,6 +1477,7 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
             "Windows native API: BluetoothLEDevice.GetGattServicesAsync(Uncached)",
             device,
             async () => await _windowsNativeDevice.GetGattServicesAsync(BluetoothCacheMode.Uncached).AsTask(cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
+        EnsureActiveConnectionAttempt(generation, cancellationToken);
         Log($"Windows native service discovery result: status={servicesResult.Status}, serviceCount={servicesResult.Services.Count}.");
         if (servicesResult.Status != GattCommunicationStatus.Success)
         {
@@ -1276,6 +1508,7 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
             "Windows native API: GattDeviceService.GetCharacteristicsAsync(Uncached)",
             device,
             async () => await _windowsIaqService.GetCharacteristicsAsync(BluetoothCacheMode.Uncached).AsTask(cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
+        EnsureActiveConnectionAttempt(generation, cancellationToken);
         Log($"Windows native characteristic discovery result: status={characteristicsResult.Status}, characteristicCount={characteristicsResult.Characteristics.Count}.");
         if (characteristicsResult.Status != GattCommunicationStatus.Success)
         {
@@ -1328,6 +1561,7 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
             "Windows native API: WriteClientCharacteristicConfigurationDescriptorAsync(Notify)",
             device,
             async () => await _windowsSensorCharacteristic.WriteClientCharacteristicConfigurationDescriptorAsync(GattClientCharacteristicConfigurationDescriptorValue.Notify).AsTask(cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
+        EnsureActiveConnectionAttempt(generation, cancellationToken);
         Log($"Windows native CCCD write result: {cccdStatus}.");
         if (cccdStatus != GattCommunicationStatus.Success)
         {
@@ -1337,20 +1571,25 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
         Log("Notification subscription succeeded.");
         Log($"[BLE-RX] GattSession.MaxPduSize={_windowsGattSession.MaxPduSize} ExpectedNotificationValueLength={RequiredNotificationPayloadLength} ValueChangedHandlerAttached={_windowsSensorHandlerAttached} CCCDEnabled=true");
 
-        using var writer = new DataWriter();
-        writer.WriteBytes(new byte[] { 0x01 });
-        var commandStatus = await RunConnectionStepAsync(
-            "Windows native API: Command WriteValueAsync",
-            device,
-            async () => await _windowsCommandCharacteristic.WriteValueAsync(writer.DetachBuffer(), GattWriteOption.WriteWithResponse).AsTask(cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
-        Log($"Windows native command write result: {commandStatus}.");
-        if (commandStatus != GattCommunicationStatus.Success)
-        {
-            throw new InvalidOperationException($"Start streaming command write returned {commandStatus}.");
-        }
-
+        await WriteCommandPayloadAsync("Start streaming command", new byte[] { 0x01 }, generation, cancellationToken).ConfigureAwait(false);
+        EnsureActiveConnectionAttempt(generation, cancellationToken);
         Log("Start streaming command sent.");
         SetState(BluetoothConnectionState.Connected);
+        StartHeartbeat(generation);
+    }
+
+    private void EnsureActiveConnectionAttempt(long generation, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!_appForeground)
+        {
+            throw new OperationCanceledException("Windows BLE operation cancelled because the app is not foreground.");
+        }
+
+        if (generation != Volatile.Read(ref _connectionGeneration))
+        {
+            throw new OperationCanceledException("Windows BLE operation cancelled because the connection generation changed.");
+        }
     }
 
     private async ValueTask CleanupWindowsNativeConnectionAsync(bool disableNotifications, CancellationToken cancellationToken)
@@ -1374,31 +1613,77 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
 
             if (_windowsSensorHandlerAttached)
             {
-                _windowsSensorCharacteristic.ValueChanged -= OnWindowsSensorValueChanged;
-                _windowsSensorHandlerAttached = false;
+                try
+                {
+                    _windowsSensorCharacteristic.ValueChanged -= OnWindowsSensorValueChanged;
+                }
+                catch (Exception ex)
+                {
+                    Log($"Windows native ValueChanged detach failed during cleanup: {ex.Message}", ex);
+                }
+                finally
+                {
+                    _windowsSensorHandlerAttached = false;
+                }
             }
         }
 
         if (_windowsGattSession is not null)
         {
-            _windowsGattSession.SessionStatusChanged -= OnWindowsGattSessionStatusChanged;
-            if (_windowsGattSession.CanMaintainConnection)
+            try
             {
-                _windowsGattSession.MaintainConnection = false;
+                _windowsGattSession.SessionStatusChanged -= OnWindowsGattSessionStatusChanged;
+                if (_windowsGattSession.CanMaintainConnection)
+                {
+                    _windowsGattSession.MaintainConnection = false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"Windows native GATT session detach failed during cleanup: {ex.Message}", ex);
             }
 
-            _windowsGattSession.Dispose();
+            try
+            {
+                _windowsGattSession.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Log($"Windows native GATT session dispose failed during cleanup: {ex.Message}", ex);
+            }
             _windowsGattSession = null;
         }
 
         if (_windowsNativeDevice is not null)
         {
-            _windowsNativeDevice.ConnectionStatusChanged -= OnWindowsNativeConnectionStatusChanged;
-            _windowsNativeDevice.Dispose();
+            try
+            {
+                _windowsNativeDevice.ConnectionStatusChanged -= OnWindowsNativeConnectionStatusChanged;
+            }
+            catch (Exception ex)
+            {
+                Log($"Windows native device event detach failed during cleanup: {ex.Message}", ex);
+            }
+
+            try
+            {
+                _windowsNativeDevice.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Log($"Windows native device dispose failed during cleanup: {ex.Message}", ex);
+            }
             _windowsNativeDevice = null;
         }
 
-        _windowsIaqService?.Dispose();
+        try
+        {
+            _windowsIaqService?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Log($"Windows native service dispose failed during cleanup: {ex.Message}", ex);
+        }
         _windowsIaqService = null;
         _windowsSensorCharacteristic = null;
         _windowsCommandCharacteristic = null;
@@ -1431,8 +1716,19 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
 
     private void OnWindowsNativeConnectionStatusChanged(BluetoothLEDevice sender, object args)
     {
-        Log($"Windows native connection status changed: {sender.ConnectionStatus}. {DescribeNativeDevice(sender)}");
-        if (sender.ConnectionStatus != BluetoothConnectionStatus.Disconnected || _userDisconnectRequested)
+        var generation = Volatile.Read(ref _connectionGeneration);
+        var connectionStatus = BluetoothConnectionStatus.Disconnected;
+        try
+        {
+            connectionStatus = sender.ConnectionStatus;
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or NullReferenceException)
+        {
+            Log($"Windows native connection status changed from stale device; ConnectionGeneration={generation}; Error={ex.GetType().Name}: {ex.Message}");
+        }
+
+        Log($"Windows native connection status changed: {connectionStatus}. ConnectionGeneration={generation}. {DescribeNativeDeviceSafe(sender)}");
+        if (connectionStatus != BluetoothConnectionStatus.Disconnected || _userDisconnectRequested || _cleanupInProgress)
         {
             return;
         }
@@ -1447,11 +1743,12 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
                     return;
                 }
 
-                await _sensorLog.StopAndSaveAsync(LogStopReason.UnexpectedDisconnect, Volatile.Read(ref _connectionGeneration), CancellationToken.None).ConfigureAwait(false);
-                await CleanupWindowsNativeConnectionAsync(disableNotifications: false, CancellationToken.None).ConfigureAwait(false);
+                var generation = Interlocked.Increment(ref _connectionGeneration);
+                await _sensorLog.StopAndSaveAsync(LogStopReason.UnexpectedDisconnect, generation, CancellationToken.None).ConfigureAwait(false);
+                await CleanupConnectionAsync(skipDisconnect: true, reason: "WindowsConnectionStatusChanged", generation, CancellationToken.None).ConfigureAwait(false);
                 SetState(BluetoothConnectionState.Disconnected);
                 Log("Windows native device disconnected unexpectedly.");
-                UnexpectedlyDisconnected?.Invoke(this, EventArgs.Empty);
+                RequestConnectionRecovery("WindowsConnectionStatusChanged");
             }
             finally
             {
@@ -1461,7 +1758,19 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
     }
 
     private void OnWindowsGattSessionStatusChanged(GattSession sender, GattSessionStatusChangedEventArgs args)
-        => Log($"Windows native GATT session status changed: Status={args.Status}; Error={args.Error}; MaxPduSize={sender.MaxPduSize}.");
+    {
+        var maxPduSize = "<unknown>";
+        try
+        {
+            maxPduSize = sender.MaxPduSize.ToString();
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or NullReferenceException)
+        {
+            maxPduSize = $"<unavailable {ex.GetType().Name}>";
+        }
+
+        Log($"Windows native GATT session status changed: Status={args.Status}; Error={args.Error}; MaxPduSize={maxPduSize}; ConnectionGeneration={Volatile.Read(ref _connectionGeneration)}.");
+    }
 
     private static ulong ParseBluetoothAddress(string deviceId)
     {
@@ -1490,12 +1799,11 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
 
     private string GetWindowsDeviceContext(IBluetoothRemoteDevice? device)
     {
+        LogWindowsContextProbe(device);
+
         if (_windowsNativeDevice is not null)
         {
-            var session = _windowsGattSession is null
-                ? "NativeGattSession=<none>;"
-                : $"NativeGattSession={_windowsGattSession.SessionStatus}; NativeMaintainConnection={_windowsGattSession.MaintainConnection}; NativeMaxPduSize={_windowsGattSession.MaxPduSize};";
-            return $"{DescribeNativeDevice(_windowsNativeDevice)} {session}";
+            return $"{DescribeNativeDeviceSafe(_windowsNativeDevice)} {DescribeWindowsGattSessionSafe(_windowsGattSession)}";
         }
 
         if (device is null)
@@ -1504,25 +1812,83 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
         }
 
         var platformDevice = device is BluetoothRemoteDevice facade ? facade.PlatformDevice : device;
-        var platformType = platformDevice.GetType();
-        var gattSessionStatus = platformType.GetProperty("GattSessionStatus")?.GetValue(platformDevice);
-        var bluetoothConnectionStatus = platformType.GetProperty("BluetoothConnectionStatus")?.GetValue(platformDevice);
-        var bluetoothLeDeviceProxy = platformType.GetProperty("BluetoothLeDeviceProxy")?.GetValue(platformDevice);
-        var nativeDevice = bluetoothLeDeviceProxy?.GetType().GetProperty("BluetoothLeDevice")?.GetValue(bluetoothLeDeviceProxy) as BluetoothLEDevice;
-        if (nativeDevice is null)
+        if (platformDevice is null)
         {
-            return $"WindowsDevice=<native not created>; PlatformType={platformType.FullName}; GattSession={gattSessionStatus ?? "<unknown>"}; BluetoothConnection={bluetoothConnectionStatus ?? "<unknown>"};";
+            return "WindowsDevice=<missing platform device>;";
         }
 
-        return $"{DescribeNativeDevice(nativeDevice)} GattSession={gattSessionStatus ?? "<unknown>"}; BluetoothConnection={bluetoothConnectionStatus ?? "<unknown>"};";
+        var platformType = platformDevice.GetType();
+        var gattSessionStatus = TryReadPlatformProperty(platformDevice, "GattSessionStatus", out var gattStatusFailure);
+        var bluetoothConnectionStatus = TryReadPlatformProperty(platformDevice, "BluetoothConnectionStatus", out var connectionStatusFailure);
+        var bluetoothLeDeviceProxy = TryReadPlatformProperty(platformDevice, "BluetoothLeDeviceProxy", out var proxyFailure);
+        var nativeDevice = bluetoothLeDeviceProxy is null
+            ? null
+            : TryReadPlatformProperty(bluetoothLeDeviceProxy, "BluetoothLeDevice", out _) as BluetoothLEDevice;
+        if (nativeDevice is null)
+        {
+            return $"WindowsDevice=<native not created>; PlatformType={platformType.FullName}; GattSession={gattSessionStatus ?? gattStatusFailure ?? "<unknown>"}; BluetoothConnection={bluetoothConnectionStatus ?? connectionStatusFailure ?? "<unknown>"}; NativeProxy={proxyFailure ?? (bluetoothLeDeviceProxy is null ? "<none>" : "<available>")};";
+        }
+
+        return $"{DescribeNativeDeviceSafe(nativeDevice)} GattSession={gattSessionStatus ?? gattStatusFailure ?? "<unknown>"}; BluetoothConnection={bluetoothConnectionStatus ?? connectionStatusFailure ?? "<unknown>"};";
     }
 
-    private static string DescribeNativeDevice(BluetoothLEDevice nativeDevice)
+    private void LogWindowsContextProbe(IBluetoothRemoteDevice? device)
     {
-        var access = nativeDevice.DeviceAccessInformation.CurrentStatus;
-        var idAccess = DeviceAccessInformation.CreateFromId(nativeDevice.DeviceId).CurrentStatus;
-        var pairing = nativeDevice.DeviceInformation.Pairing;
-        return $"NativeDeviceId={nativeDevice.DeviceId}; NativeName={nativeDevice.Name}; DeviceAccess={access}; DeviceIdAccess={idAccess}; IsPaired={pairing.IsPaired}; CanPair={pairing.CanPair}; ProtectionLevel={pairing.ProtectionLevel}; ConnectionStatus={nativeDevice.ConnectionStatus};";
+        Log($"[BLE-WIN] GetWindowsDeviceContext start; state={State}; device_null={device is null}; native_context_available={_windowsNativeDevice is not null}; connect_generation={Volatile.Read(ref _connectionGeneration)}; cleanup_in_progress={_cleanupInProgress}; app_foreground={_appForeground}.");
+    }
+
+    private static object? TryReadPlatformProperty(object target, string propertyName, out string? failureReason)
+    {
+        try
+        {
+            failureReason = null;
+            return target.GetType().GetProperty(propertyName)?.GetValue(target);
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or NullReferenceException)
+        {
+            failureReason = $"<{ex.GetType().Name}: {ex.Message}>";
+            return null;
+        }
+    }
+
+    private static string DescribeWindowsGattSessionSafe(GattSession? session)
+    {
+        if (session is null)
+        {
+            return "NativeGattSession=<none>;";
+        }
+
+        try
+        {
+            return $"NativeGattSession={session.SessionStatus}; NativeMaintainConnection={session.MaintainConnection}; NativeMaxPduSize={session.MaxPduSize};";
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or NullReferenceException)
+        {
+            return $"NativeGattSession=<unavailable {ex.GetType().Name}>;";
+        }
+    }
+
+    private static string DescribeNativeDeviceSafe(BluetoothLEDevice? nativeDevice)
+    {
+        if (nativeDevice is null)
+        {
+            return "NativeDevice=<none>;";
+        }
+
+        try
+        {
+            var deviceId = nativeDevice.DeviceId;
+            var access = nativeDevice.DeviceAccessInformation?.CurrentStatus.ToString() ?? "<unknown>";
+            var idAccess = string.IsNullOrWhiteSpace(deviceId)
+                ? "<unknown>"
+                : DeviceAccessInformation.CreateFromId(deviceId).CurrentStatus.ToString();
+            var pairing = nativeDevice.DeviceInformation?.Pairing;
+            return $"NativeDeviceId={deviceId ?? "<none>"}; NativeName={nativeDevice.Name ?? "<none>"}; DeviceAccess={access}; DeviceIdAccess={idAccess}; IsPaired={pairing?.IsPaired.ToString() ?? "<unknown>"}; CanPair={pairing?.CanPair.ToString() ?? "<unknown>"}; ProtectionLevel={pairing?.ProtectionLevel.ToString() ?? "<unknown>"}; ConnectionStatus={nativeDevice.ConnectionStatus};";
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or NullReferenceException)
+        {
+            return $"NativeDevice=<unavailable {ex.GetType().Name}: {ex.Message}>;";
+        }
     }
 #endif
 

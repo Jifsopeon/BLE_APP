@@ -36,5 +36,9 @@ public interface IBluetoothSensorService : IAsyncDisposable
 
     Task ReconnectAsync(CancellationToken cancellationToken);
 
+    Task SuspendAsync(CancellationToken cancellationToken);
+
+    Task ResumeAsync(CancellationToken cancellationToken);
+
     Task SetManualLabelAsync(ManualLabelState label, CancellationToken cancellationToken);
 }

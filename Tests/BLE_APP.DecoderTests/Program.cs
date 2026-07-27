@@ -959,6 +959,18 @@ internal sealed class FakeBluetoothSensorService : IBluetoothSensorService
         return Task.CompletedTask;
     }
 
+    public Task SuspendAsync(CancellationToken cancellationToken)
+    {
+        State = BluetoothConnectionState.Suspended;
+        return Task.CompletedTask;
+    }
+
+    public Task ResumeAsync(CancellationToken cancellationToken)
+    {
+        State = BluetoothConnectionState.ReceivingData;
+        return Task.CompletedTask;
+    }
+
     public Task SetManualLabelAsync(ManualLabelState label, CancellationToken cancellationToken)
     {
         LastRequestedManualLabel = label;

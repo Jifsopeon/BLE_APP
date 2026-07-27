@@ -21,6 +21,17 @@
             Command="{Binding DisappearingCommand}" />
     </ContentPage.Behaviors>
 
+    <Shell.TitleView>
+        <Image Source="pse84_iaq_logo.png"
+               Aspect="AspectFit"
+               WidthRequest="180"
+               HeightRequest="34"
+               HorizontalOptions="Start"
+               VerticalOptions="Center"
+               Margin="0,6,0,6"
+               SemanticProperties.Description="PSE84 IAQ" />
+    </Shell.TitleView>
+
     <ScrollView>
         <Grid x:Name="PageGrid"
               Padding="24"

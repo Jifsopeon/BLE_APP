@@ -30,7 +30,7 @@
 		<MauiEnableXamlCBindingWithSourceCompilation>true</MauiEnableXamlCBindingWithSourceCompilation>
 
 		<!-- Display name -->
-		<ApplicationTitle>BLE_APP</ApplicationTitle>
+		<ApplicationTitle>PSE84 IAQ</ApplicationTitle>
 
 		<!-- App Identifier -->
 		<ApplicationId>com.companyname.bleapp</ApplicationId>
@@ -55,13 +55,14 @@
 
 	<ItemGroup>
 		<!-- App Icon -->
-		<MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#F6F8F6" />
+		<MauiIcon Include="Resources\AppIcon\pse84_iaq_appicon.svg" Color="#FFFFFF" />
 
 		<!-- Splash Screen -->
-		<MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#F6F8F6" BaseSize="128,128" />
+		<MauiSplashScreen Include="Resources\Splash\pse84_iaq_splash.svg" Color="#F6F8F6" BaseSize="240,45" />
 
 		<!-- Images -->
 		<MauiImage Include="Resources\Images\*" />
+		<MauiImage Update="Resources\Images\pse84_iaq_logo.svg" BaseSize="463,87" />
 		<!-- Custom Fonts -->
 		<MauiFont Include="Resources\Fonts\*" />
 
