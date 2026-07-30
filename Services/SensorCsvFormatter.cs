@@ -6,7 +6,7 @@ namespace BLE_APP.Services;
 
 public static class SensorCsvFormatter
 {
-    public const string Header = "Sample,Date,Time,TimestampISO8601,ElapsedSeconds,PM1_0,PM2_5,PM4_0,PM10,Humidity,Temperature,VOC,NOx,CO2,distance,ManualLabel,ManualLabelRaw";
+    public const string Header = "Sample,Date,Time,TimestampISO8601,ElapsedSeconds,PM1_0,PM2_5,PM4_0,PM10,Humidity,Temperature,VOC,NOx,CO2,distance,ManualLabel,ManualLabelRaw,Predicted,PredictedRaw";
 
     public static string FormatRow(long sample, DateTimeOffset sessionStart, SensorReading reading)
     {
@@ -30,7 +30,9 @@ public static class SensorCsvFormatter
             reading.Co2?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
             FormatDistance(reading.DistanceMetres),
             SensorPacketProtocol.FormatManualLabel(reading.ManualLabel),
-            reading.ManualLabelRaw.ToString(CultureInfo.InvariantCulture)
+            reading.ManualLabelRaw.ToString(CultureInfo.InvariantCulture),
+            SensorPacketProtocol.FormatPrediction(reading.Predicted),
+            reading.PredictedRaw.ToString(CultureInfo.InvariantCulture)
         };
 
         return string.Join(",", columns.Select(Escape));

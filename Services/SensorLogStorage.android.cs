@@ -1,8 +1,9 @@
-#if ANDROID
+﻿#if ANDROID
 using Android.App;
 using Android.Content;
 using Android.Provider;
 using Microsoft.Maui.ApplicationModel;
+using Microsoft.Maui.Storage;
 using Application = Android.App.Application;
 using Uri = Android.Net.Uri;
 
@@ -10,14 +11,27 @@ namespace BLE_APP.Services;
 
 public static partial class SensorLogStorage
 {
+    private const string SelectedTreeUriPreferenceKey = "SensorLogStorage.Android.SelectedTreeUri";
     private static Uri? s_sessionTreeUri;
     private static string? s_sessionTreeDisplayName;
 
     public static partial string? SelectedFolderDisplayName
-        => s_sessionTreeUri is null ? null : s_sessionTreeDisplayName;
+    {
+        get
+        {
+            RestorePersistedTreeUriIfNeeded();
+            return s_sessionTreeUri is null ? null : s_sessionTreeDisplayName;
+        }
+    }
 
     public static partial bool HasSelectedFolder
-        => s_sessionTreeUri is not null;
+    {
+        get
+        {
+            RestorePersistedTreeUriIfNeeded();
+            return s_sessionTreeUri is not null;
+        }
+    }
 
     public static partial async Task<SensorLogTarget> OpenNewLogAsync(CancellationToken cancellationToken)
     {
@@ -72,6 +86,8 @@ public static partial class SensorLogStorage
             return false;
         }
 
+        AndroidDocumentTree.PersistTreePermission(uri);
+        Preferences.Default.Set(SelectedTreeUriPreferenceKey, uri.ToString());
         s_sessionTreeUri = uri;
         s_sessionTreeDisplayName = AndroidDocumentTree.GetDisplayName(uri) ?? "Selected Android folder";
         return true;
@@ -79,12 +95,31 @@ public static partial class SensorLogStorage
 
     private static Uri? GetSessionTreeUri()
     {
-        if (s_sessionTreeUri is null)
+        RestorePersistedTreeUriIfNeeded();
+        return s_sessionTreeUri;
+    }
+
+    private static void RestorePersistedTreeUriIfNeeded()
+    {
+        if (s_sessionTreeUri is not null)
         {
-            return null;
+            return;
         }
 
-        return s_sessionTreeUri;
+        var persisted = Preferences.Default.Get(SelectedTreeUriPreferenceKey, string.Empty);
+        if (string.IsNullOrWhiteSpace(persisted))
+        {
+            return;
+        }
+
+        var uri = Uri.Parse(persisted);
+        if (uri is null)
+        {
+            return;
+        }
+
+        s_sessionTreeUri = uri;
+        s_sessionTreeDisplayName = AndroidDocumentTree.GetDisplayName(uri) ?? "Selected Android folder";
     }
 }
 
@@ -142,6 +177,25 @@ internal static class AndroidDocumentTree
         }
     }
 
+    public static void PersistTreePermission(Uri treeUri)
+    {
+        var resolver = Application.Context.ContentResolver;
+        if (resolver is null)
+        {
+            return;
+        }
+
+        const ActivityFlags flags = ActivityFlags.GrantReadUriPermission | ActivityFlags.GrantWriteUriPermission;
+        try
+        {
+            resolver.TakePersistableUriPermission(treeUri, flags);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[ANDROID-STORAGE] Persisting log folder URI permission failed: {ex}");
+        }
+    }
+
     public static Uri? CreateDocument(Uri parentUri, string mimeType, string displayName)
         => Application.Context.ContentResolver is null
             ? null
@@ -195,7 +249,7 @@ internal static class AndroidLogFolderPicker
         using var registration = cancellationToken.Register(() => _pendingPicker?.TrySetCanceled(cancellationToken));
 
         var intent = new Intent(Intent.ActionOpenDocumentTree);
-        intent.AddFlags(ActivityFlags.GrantReadUriPermission | ActivityFlags.GrantWriteUriPermission | ActivityFlags.GrantPrefixUriPermission);
+        intent.AddFlags(ActivityFlags.GrantReadUriPermission | ActivityFlags.GrantWriteUriPermission | ActivityFlags.GrantPrefixUriPermission | ActivityFlags.GrantPersistableUriPermission);
         activity.StartActivityForResult(intent, MainActivity.LogFolderRequestCode);
         return _pendingPicker.Task;
     }

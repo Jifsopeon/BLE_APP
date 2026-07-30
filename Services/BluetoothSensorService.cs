@@ -1,4 +1,4 @@
-using Bluetooth.Abstractions;
+﻿using Bluetooth.Abstractions;
 using Bluetooth.Abstractions.Scanning;
 using Bluetooth.Abstractions.Scanning.EventArgs;
 using Bluetooth.Abstractions.Scanning.Exceptions;
@@ -89,9 +89,14 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
     private bool _appForeground = true;
     private bool _cleanupInProgress;
     private int _recoveryInProgress;
+    private CancellationTokenSource? _recoveryCts;
     private CancellationTokenSource? _heartbeatCts;
     private Task? _heartbeatTask;
     private bool _disposed;
+#if ANDROID
+    private bool _androidForegroundSessionActive;
+    private bool _androidReconnectLoopActive;
+#endif
 
 #if WINDOWS
     private BluetoothLEDevice? _windowsNativeDevice;
@@ -290,6 +295,10 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
 
             await RunConnectionStepAsync("Cleanup previous connection", deviceId, async () => await CleanupConnectionAsync(skipDisconnect: false, reason: "BeforeNewConnection", generation, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
 
+#if ANDROID
+            await StartAndroidForegroundMonitoringAsync(BluetoothConnectionState.Connecting, cancellationToken).ConfigureAwait(false);
+#endif
+
 #if WINDOWS
             SetState(BluetoothConnectionState.Connecting);
             Log($"Connection attempt started: {device.Name} ({device.Id}).");
@@ -438,6 +447,12 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
                 Log($"Connection cleanup failed after preserving original error: {cleanupException.Message}", cleanupException);
             }
 
+#if ANDROID
+            if (!_androidReconnectLoopActive)
+            {
+                await StopAndroidForegroundMonitoringAsync().ConfigureAwait(false);
+            }
+#endif
             SetState(BluetoothConnectionState.Disconnected);
             throw;
         }
@@ -449,6 +464,13 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
 
     public async Task DisconnectAsync(bool userInitiated, CancellationToken cancellationToken)
     {
+        if (userInitiated)
+        {
+            _userDisconnectRequested = true;
+            Log("[BLE-DISCONNECT] User disconnect requested.");
+            CancelActiveRecovery("UserDisconnect");
+        }
+
         await _connectionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -456,10 +478,17 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
             var previousGeneration = Volatile.Read(ref _connectionGeneration);
             var generation = Interlocked.Increment(ref _connectionGeneration);
             LogLifecycle("Disconnect requested", userInitiated ? "UserDisconnect" : "ProgrammaticDisconnect", _currentDevice?.Id, generation);
+            if (userInitiated)
+            {
+                Log("[BLE-DISCONNECT] User-disconnect flag set before GATT disconnect.");
+            }
             SetState(BluetoothConnectionState.Disconnecting);
             await _sensorLog.StopAndSaveAsync(userInitiated ? LogStopReason.UserDisconnect : LogStopReason.ProgrammaticDisconnect, previousGeneration, CancellationToken.None).ConfigureAwait(false);
             await CleanupConnectionAsync(skipDisconnect: false, reason: userInitiated ? "UserDisconnect" : "ProgrammaticDisconnect", generation, cancellationToken).ConfigureAwait(false);
             SetState(BluetoothConnectionState.Disconnected);
+#if ANDROID
+            await StopAndroidForegroundMonitoringAsync().ConfigureAwait(false);
+#endif
             Log("Cleanup completed.");
         }
         finally
@@ -469,7 +498,16 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
     }
 
     public async Task ReconnectAsync(CancellationToken cancellationToken)
+        => await ReconnectAsync(cancellationToken, automaticRecovery: false).ConfigureAwait(false);
+
+    private async Task ReconnectAsync(CancellationToken cancellationToken, bool automaticRecovery)
     {
+        if (!automaticRecovery)
+        {
+            _userDisconnectRequested = false;
+            Log("[BLE-RECOVERY] Manual reconnect requested.");
+        }
+
         await _reconnectGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -495,30 +533,68 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
             }
 
             await Task.Delay(ReconnectSettleDelay, cancellationToken).ConfigureAwait(false);
-            LogLifecycle("Reconnect start", "ReconnectAsync", deviceId, Volatile.Read(ref _connectionGeneration));
-            for (var attempt = 1; attempt <= ReconnectBackoff.Length && !_userDisconnectRequested && _appForeground; attempt++)
+            LogLifecycle("Reconnect start", automaticRecovery ? "AutomaticRecovery" : "ReconnectAsync", deviceId, Volatile.Read(ref _connectionGeneration));
+            Exception? lastReconnectException = null;
+#if ANDROID
+            _androidReconnectLoopActive = true;
+#endif
+            try
             {
-                SetState(BluetoothConnectionState.Reconnecting);
-                var delay = ReconnectBackoff[attempt - 1];
-                Log($"Reconnection attempt {attempt} in {delay.TotalSeconds:0}s.");
-                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                Log("[BLE-RECOVERY] Reconnect task started.");
+                for (var attempt = 1; attempt <= ReconnectBackoff.Length && !_userDisconnectRequested && CanRunConnectionWork; attempt++)
+                {
+                    SetState(BluetoothConnectionState.Reconnecting);
+                    var delay = ReconnectBackoff[attempt - 1];
+                    Log($"Reconnection attempt {attempt} in {delay.TotalSeconds:0}s.");
+                    await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
 
-                try
-                {
-                    await ConnectAsync(deviceId, cancellationToken).ConfigureAwait(false);
-                    return;
-                }
-                catch (Exception ex) when (attempt < ReconnectBackoff.Length)
-                {
-                    Log($"Reconnect attempt {attempt} failed: {ex.Message}", ex);
+                    try
+                    {
+                        await ConnectAsync(deviceId, cancellationToken).ConfigureAwait(false);
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        lastReconnectException = ex;
+                        if (attempt < ReconnectBackoff.Length)
+                        {
+                            Log($"Reconnect attempt {attempt} failed: {ex.Message}", ex);
+                        }
+                    }
                 }
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                Log("[BLE-RECOVERY] Reconnect task cancelled.");
+                throw;
+            }
+            finally
+            {
+#if ANDROID
+                _androidReconnectLoopActive = false;
+#endif
+            }
 
+            var failedGeneration = Volatile.Read(ref _connectionGeneration);
+            await _sensorLog.StopAndSaveAsync(LogStopReason.UnexpectedDisconnect, failedGeneration, CancellationToken.None).ConfigureAwait(false);
             SetState(BluetoothConnectionState.Disconnected);
+#if ANDROID
+            await StopAndroidForegroundMonitoringAsync().ConfigureAwait(false);
+#endif
+            if (lastReconnectException is not null && !_userDisconnectRequested)
+            {
+                throw new InvalidOperationException("Automatic reconnect attempts failed.", lastReconnectException);
+            }
         }
         finally
         {
             Volatile.Write(ref _recoveryInProgress, 0);
+            if (automaticRecovery)
+            {
+                var cts = Interlocked.Exchange(ref _recoveryCts, null);
+                cts?.Dispose();
+            }
+
             _reconnectGate.Release();
         }
     }
@@ -530,6 +606,14 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
         try
         {
             _appForeground = false;
+#if ANDROID
+            if (_androidForegroundSessionActive && _currentDevice is not null)
+            {
+                LogLifecycle("Android app backgrounded; foreground BLE service retains connection", "AppSuspend", _currentDevice.Id, Volatile.Read(ref _connectionGeneration));
+                AndroidBleForegroundServiceController.UpdateState(State);
+                return;
+            }
+#endif
             var generation = Interlocked.Increment(ref _connectionGeneration);
             LogLifecycle("Suspend cleanup start", "AppSuspend", _currentDevice?.Id, generation);
             SetState(BluetoothConnectionState.Suspended);
@@ -547,6 +631,14 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
     {
         ThrowIfDisposed();
         _appForeground = true;
+#if ANDROID
+        if (_androidForegroundSessionActive && _currentDevice is not null)
+        {
+            LogLifecycle("Android app foregrounded; reusing foreground BLE service connection", "AppResume", _currentDevice.Id, Volatile.Read(ref _connectionGeneration));
+            SetState(State);
+            return;
+        }
+#endif
         if (_currentDevice is null)
         {
             SetState(BluetoothConnectionState.Disconnected);
@@ -578,10 +670,21 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
 #endif
     }
 
+    private bool CanRunConnectionWork
+    {
+        get
+        {
+#if ANDROID
+            return _appForeground || _androidForegroundSessionActive;
+#else
+            return _appForeground;
+#endif
+        }
+    }
     private void StartHeartbeat(long generation)
     {
         StopHeartbeat();
-        if (!_appForeground || _userDisconnectRequested)
+        if (!CanRunConnectionWork || _userDisconnectRequested)
         {
             return;
         }
@@ -632,7 +735,7 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
 
     private async Task SendHeartbeatAsync(long generation, CancellationToken cancellationToken)
     {
-        if (!_appForeground || _userDisconnectRequested || generation != Volatile.Read(ref _connectionGeneration))
+        if (!CanRunConnectionWork || _userDisconnectRequested || generation != Volatile.Read(ref _connectionGeneration))
         {
             return;
         }
@@ -641,7 +744,7 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
         {
             await WriteCommandPayloadAsync("Heartbeat command", new[] { ClientHeartbeatCommand }, generation, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || !_appForeground || _userDisconnectRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || !CanRunConnectionWork || _userDisconnectRequested)
         {
         }
         catch (Exception ex)
@@ -653,8 +756,9 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
 
     private void RequestConnectionRecovery(string reason)
     {
-        if (_disposed || _userDisconnectRequested || !_appForeground)
+        if (_disposed || _userDisconnectRequested || !CanRunConnectionWork)
         {
+            Log($"[BLE-RECOVERY] Recovery request suppressed; Reason={reason}; Disposed={_disposed}; UserDisconnect={_userDisconnectRequested}; CanRun={CanRunConnectionWork}.");
             return;
         }
 
@@ -664,11 +768,23 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
             return;
         }
 
+        var recoveryCts = new CancellationTokenSource();
+        var previousRecoveryCts = Interlocked.Exchange(ref _recoveryCts, recoveryCts);
+        previousRecoveryCts?.Cancel();
+        previousRecoveryCts?.Dispose();
+        var recoveryToken = recoveryCts.Token;
+        Log($"[BLE-RECOVERY] Recovery request accepted; Reason={reason}.");
+
         _ = Task.Run(async () =>
         {
             try
             {
-                await ReconnectAsync(CancellationToken.None).ConfigureAwait(false);
+                await ReconnectAsync(recoveryToken, automaticRecovery: true).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (recoveryToken.IsCancellationRequested || _userDisconnectRequested)
+            {
+                Volatile.Write(ref _recoveryInProgress, 0);
+                Log("[BLE-RECOVERY] Reconnect task cancelled.");
             }
             catch (Exception ex)
             {
@@ -678,6 +794,28 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
                 UnexpectedlyDisconnected?.Invoke(this, EventArgs.Empty);
             }
         });
+    }
+
+    private void CancelActiveRecovery(string reason)
+    {
+        var cts = Interlocked.Exchange(ref _recoveryCts, null);
+        if (cts is null)
+        {
+            return;
+        }
+
+        Log($"[BLE-RECOVERY] Recovery cancellation requested. Reason={reason}.");
+        try
+        {
+            cts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        finally
+        {
+            cts.Dispose();
+        }
     }
 
     private void OnDeviceListChanged(object? sender, DeviceListChangedEventArgs e)
@@ -840,6 +978,28 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
     }
 
 #if ANDROID
+    private async Task StartAndroidForegroundMonitoringAsync(BluetoothConnectionState initialState, CancellationToken cancellationToken)
+    {
+        if (_androidForegroundSessionActive && AndroidBleForegroundServiceController.IsRunning)
+        {
+            AndroidBleForegroundServiceController.UpdateState(initialState);
+            return;
+        }
+
+        await AndroidBleForegroundServiceController.StartAsync(initialState, message => Log(message), cancellationToken).ConfigureAwait(false);
+        _androidForegroundSessionActive = true;
+    }
+
+    private async Task StopAndroidForegroundMonitoringAsync()
+    {
+        if (!_androidForegroundSessionActive && !AndroidBleForegroundServiceController.IsRunning)
+        {
+            return;
+        }
+
+        _androidForegroundSessionActive = false;
+        await AndroidBleForegroundServiceController.StopAsync(message => Log(message)).ConfigureAwait(false);
+    }
     private async Task NegotiateAndroidMtuAsync(IBluetoothRemoteDevice device, CancellationToken cancellationToken)
     {
         try
@@ -870,14 +1030,17 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
 
     private void OnUnexpectedDisconnection(object? sender, DeviceUnexpectedDisconnectionEventArgs e)
     {
+        Log($"[BLE-DISCONNECT] Native/plugin disconnected callback received. UserDisconnect={_userDisconnectRequested}; CleanupInProgress={_cleanupInProgress}; State={State}.");
         if (_userDisconnectRequested)
         {
+            Log("[BLE-DISCONNECT] Disconnected callback classified as expected.");
             return;
         }
 
         _ = _sensorLog.StopAndSaveAsync(LogStopReason.UnexpectedDisconnect, Volatile.Read(ref _connectionGeneration), CancellationToken.None);
-        SetState(BluetoothConnectionState.Disconnected);
+        SetState(BluetoothConnectionState.Reconnecting);
         Log("Device disconnected unexpectedly.");
+        Log("[BLE-DISCONNECT] Disconnected callback classified as unexpected.");
         RequestConnectionRecovery("UnexpectedDisconnection");
     }
 
@@ -1896,6 +2059,12 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
     {
         State = state;
         Log($"State: {state}.");
+#if ANDROID
+        if (_androidForegroundSessionActive || AndroidBleForegroundServiceController.IsRunning)
+        {
+            AndroidBleForegroundServiceController.UpdateState(state);
+        }
+#endif
     }
 
     private void Log(string message, Exception? exception = null)
@@ -1917,3 +2086,7 @@ public sealed class BluetoothSensorService : IBluetoothSensorService
         ObjectDisposedException.ThrowIf(_disposed, this);
     }
 }
+
+
+
+

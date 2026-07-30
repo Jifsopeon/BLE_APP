@@ -9,10 +9,10 @@ public sealed class SensorPacketDecoder
 
     public SensorReading Decode(ReadOnlySpan<byte> payload)
     {
-        if (payload.Length != SensorPacketProtocol.PacketLength)
+        if (payload.Length is not SensorPacketProtocol.PacketLength and not SensorPacketProtocol.LegacyPacketLength)
         {
             throw new SensorPacketFormatException(
-                $"Incompatible firmware packet: expected {SensorPacketProtocol.PacketLength} bytes, received {payload.Length} bytes.");
+                $"Incompatible firmware packet: expected {SensorPacketProtocol.PacketLength} or {SensorPacketProtocol.LegacyPacketLength} bytes, received {payload.Length} bytes.");
         }
 
         // Bytes 0..1: sequence number, UInt16 little-endian.
@@ -22,6 +22,7 @@ public sealed class SensorPacketDecoder
         // Bytes 18..19: CO2, UInt16 ppm.
         // Bytes 20..21: selected radar distance in mm, UInt16 little-endian.
         // Byte 22: active manual label, 0 = No Smoking, 1 = Smoking.
+        // Byte 23: model prediction, 0 = No Smoking, 1 = Smoking, 255 = Not Ready.
         // Convert radar distance to metres by dividing by 1000.0.
         // A value of zero means no valid presence distance.
         ushort sequence = BinaryPrimitives.ReadUInt16LittleEndian(payload[0..2]);
@@ -39,6 +40,12 @@ public sealed class SensorPacketDecoder
         ManualLabelState manualLabel = SensorPacketProtocol.TryDecodeManualLabel(manualLabelRaw, out var decodedLabel)
             ? decodedLabel
             : ManualLabelState.Unknown;
+        byte predictedRaw = payload.Length > SensorPacketProtocol.PredictedOffset
+            ? payload[SensorPacketProtocol.PredictedOffset]
+            : SensorPacketProtocol.PredictionNotReadyRaw;
+        ManualLabelState predicted = SensorPacketProtocol.TryDecodeManualLabel(predictedRaw, out var decodedPrediction)
+            ? decodedPrediction
+            : ManualLabelState.Unknown;
 
         return new SensorReading(
             DateTimeOffset.Now,
@@ -54,7 +61,9 @@ public sealed class SensorPacketDecoder
             co2 == 0xFFFF ? null : co2,
             radarDistanceRaw / 1000.0,
             manualLabel,
-            manualLabelRaw);
+            manualLabelRaw,
+            predicted,
+            predictedRaw);
     }
 
     private static double? ScaleUnsignedTenths(ushort value)

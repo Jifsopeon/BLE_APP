@@ -371,6 +371,30 @@
                             </VerticalStackLayout>
                         </Border>
 
+                        <Border Stroke="{StaticResource BorderColor}"
+                                StrokeThickness="1"
+                                Padding="12"
+                                Margin="0,0,10,10"
+                                FlexLayout.Basis="320"
+                                FlexLayout.Grow="1"
+                                BackgroundColor="{StaticResource CardBackground}">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="6" />
+                            </Border.StrokeShape>
+                            <VerticalStackLayout Spacing="8">
+                                <Label Text="Predicted"
+                                       FontSize="13"
+                                       TextColor="{StaticResource TextSecondary}" />
+                                <Label Text="{Binding PredictedText}"
+                                       FontSize="24"
+                                       FontAttributes="Bold"
+                                       LineBreakMode="TailTruncation" />
+                                <Label Text=""
+                                       FontSize="12"
+                                       TextColor="{StaticResource TextSecondary}" />
+                            </VerticalStackLayout>
+                        </Border>
+
                     </FlexLayout>
                 </Grid>
             </Border>

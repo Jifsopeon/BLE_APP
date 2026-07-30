@@ -19,6 +19,10 @@ SingleRadarDistanceDecodesToMetres();
 ManualLabelPacketSmokingDecodes();
 ManualLabelPacketNoSmokingDecodes();
 UnknownManualLabelRawDecodesAsUnknown();
+PredictedPacketSmokingDecodes();
+PredictedPacketNoSmokingDecodes();
+Legacy23BytePacketDecodesWithPredictionNotReady();
+UnknownPredictionRawDecodesAsNotReady();
 Legacy20BytePacketIsRejected();
 Old22BytePacketIsRejected();
 MultipleSequentialPacketsDecode();
@@ -61,6 +65,7 @@ ChartSeriesColorPropertiesMatchStrokeColors();
 ChartSeriesColorsStayStableWhenVisibilityChanges();
 ManualLabelConfirmationTimeoutAllowsOneSecondSampling();
 await ManualLabelUiCommandRequestsSmoking();
+ManualLabelUiCommandDoesNotChangePredictedText();
 ExactNameMatchUsesOrdinalIgnoreCaseAndTrim();
 ExactNameMatchIgnoresEmptySearch();
 ExactNameMatchOrdersAheadOfPartialAndIdMatches();
@@ -99,6 +104,8 @@ void NormalPacketDecodesAllFields()
     CloseNullable(34.5, reading.Voc, "voc");
     Equal((ushort)800, reading.Co2, "co2");
     CloseRequired(0.0, reading.DistanceMetres, "distance");
+    Equal(ManualLabelState.Smoking, reading.Predicted, "predicted");
+    Equal((byte)1, reading.PredictedRaw, "predicted raw");
 }
 
 void ActualFirmwarePacketBytesDecode()
@@ -134,6 +141,8 @@ void ActualFirmwarePacketBytesDecode()
     CloseRequired(1.25, reading.DistanceMetres, "firmware distance");
     Equal(ManualLabelState.Smoking, reading.ManualLabel, "firmware manual label");
     Equal((byte)1, reading.ManualLabelRaw, "firmware manual label raw");
+    Equal(ManualLabelState.Unknown, reading.Predicted, "legacy firmware predicted");
+    Equal(SensorPacketProtocol.PredictionNotReadyRaw, reading.PredictedRaw, "legacy firmware predicted raw");
 }
 
 void FirstByte03IsSequenceLowByte()
@@ -181,6 +190,38 @@ void UnknownManualLabelRawDecodesAsUnknown()
     Equal((byte)0x7F, reading.ManualLabelRaw, "manual label unknown raw");
 }
 
+void PredictedPacketSmokingDecodes()
+{
+    var reading = decoder.Decode(MakePacket(predictedRaw: SensorPacketProtocol.ManualLabelSmokingRaw));
+    Equal(ManualLabelState.Smoking, reading.Predicted, "predicted smoking");
+    Equal((byte)1, reading.PredictedRaw, "predicted smoking raw");
+}
+
+void PredictedPacketNoSmokingDecodes()
+{
+    var reading = decoder.Decode(MakePacket(predictedRaw: SensorPacketProtocol.ManualLabelNoSmokingRaw));
+    Equal(ManualLabelState.NoSmoking, reading.Predicted, "predicted no smoking");
+    Equal((byte)0, reading.PredictedRaw, "predicted no smoking raw");
+}
+
+void Legacy23BytePacketDecodesWithPredictionNotReady()
+{
+    var packet = MakeLegacy23Packet();
+    var reading = decoder.Decode(packet);
+
+    Equal(SensorPacketProtocol.LegacyPacketLength, packet.Length, "legacy packet length");
+    Equal(ManualLabelState.Smoking, reading.ManualLabel, "legacy manual label");
+    Equal(ManualLabelState.Unknown, reading.Predicted, "legacy predicted not ready");
+    Equal(SensorPacketProtocol.PredictionNotReadyRaw, reading.PredictedRaw, "legacy predicted raw");
+}
+
+void UnknownPredictionRawDecodesAsNotReady()
+{
+    var reading = decoder.Decode(MakePacket(predictedRaw: 0x7F));
+    Equal(ManualLabelState.Unknown, reading.Predicted, "unknown prediction maps not ready");
+    Equal((byte)0x7F, reading.PredictedRaw, "unknown prediction raw");
+}
+
 void Legacy20BytePacketIsRejected()
 {
     Throws<SensorPacketFormatException>(() => decoder.Decode(MakePacket()[..20]), "legacy 20-byte packet");
@@ -201,7 +242,7 @@ void MultipleSequentialPacketsDecode()
 
 void CsvHeaderMatchesExpectedOrder()
 {
-    Equal("Sample,Date,Time,TimestampISO8601,ElapsedSeconds,PM1_0,PM2_5,PM4_0,PM10,Humidity,Temperature,VOC,NOx,CO2,distance,ManualLabel,ManualLabelRaw",
+    Equal("Sample,Date,Time,TimestampISO8601,ElapsedSeconds,PM1_0,PM2_5,PM4_0,PM10,Humidity,Temperature,VOC,NOx,CO2,distance,ManualLabel,ManualLabelRaw,Predicted,PredictedRaw",
         SensorCsvFormatter.Header,
         "csv header");
 }
@@ -212,7 +253,7 @@ void CsvRowFormatsManualLabelAndRawValue()
     var reading = MakeReading(timestamp: timestamp);
     var row = SensorCsvFormatter.FormatRow(1, timestamp.AddSeconds(-2), reading);
 
-    Equal(true, row.Contains(",Smoking,1", StringComparison.Ordinal), "csv manual label");
+    Equal(true, row.Contains(",Smoking,1,Smoking,1", StringComparison.Ordinal), "csv manual label and predicted");
 }
 
 void CsvRowFormatsOneRadarDistance()
@@ -290,8 +331,11 @@ void CsvRowManualLabelFollowsRadarDistanceColumns()
 
     Equal("distance", SensorCsvFormatter.Header.Split(',')[14], "csv distance header position");
     Equal("ManualLabel", SensorCsvFormatter.Header.Split(',')[15], "csv manual label header position");
+    Equal("Predicted", SensorCsvFormatter.Header.Split(',')[17], "csv predicted header position");
     Equal("Unknown", columns[15], "csv manual label follows distance");
     Equal("127", columns[16], "csv manual label raw follows label");
+    Equal("Smoking", columns[17], "csv predicted follows manual label raw");
+    Equal("1", columns[18], "csv predicted raw follows predicted");
 }
 
 void CsvRowUsesInvariantFormattingAndOffsetTimestamp()
@@ -679,6 +723,23 @@ async Task ManualLabelUiCommandRequestsSmoking()
     Equal(ManualLabelState.Smoking, bluetooth.LastRequestedManualLabel, "ui smoking command");
 }
 
+void ManualLabelUiCommandDoesNotChangePredictedText()
+{
+    var bluetooth = new FakeBluetoothSensorService { CanSetManualLabel = true };
+    var model = new MainPageModel(bluetooth, new FakeSensorLogService());
+    var reading = MakeReading() with
+    {
+        ManualLabel = ManualLabelState.NoSmoking,
+        ManualLabelRaw = SensorPacketProtocol.ManualLabelNoSmokingRaw,
+        Predicted = ManualLabelState.Smoking,
+        PredictedRaw = SensorPacketProtocol.ManualLabelSmokingRaw
+    };
+
+    bluetooth.RaiseReading(reading);
+
+    Equal("Smoking", model.PredictedText, "predicted text follows packet");
+}
+
 void ExactNameMatchUsesOrdinalIgnoreCaseAndTrim()
 {
     Equal(true, MainPageModel.IsExactNameMatch("PSE84-IAQ", "pse84-iaq"), "exact lower-case name");
@@ -816,6 +877,8 @@ static SensorReading MakeReading(DateTimeOffset? timestamp = null, ushort sequen
         co2,
         1.25,
         ManualLabelState.Smoking,
+        1,
+        ManualLabelState.Smoking,
         1);
 
 static byte[] MakePacket(
@@ -830,7 +893,8 @@ static byte[] MakePacket(
     short voc = 60,
     ushort co2 = 700,
     ushort distanceRaw = 0,
-    byte manualLabelRaw = SensorPacketProtocol.ManualLabelSmokingRaw)
+    byte manualLabelRaw = SensorPacketProtocol.ManualLabelSmokingRaw,
+    byte predictedRaw = SensorPacketProtocol.ManualLabelSmokingRaw)
 {
     var packet = new byte[SensorPacketProtocol.PacketLength];
     WriteU16(packet, 0, sequence);
@@ -845,6 +909,14 @@ static byte[] MakePacket(
     WriteU16(packet, 18, co2);
     WriteU16(packet, SensorPacketProtocol.RadarDistanceOffset, distanceRaw);
     packet[SensorPacketProtocol.ManualLabelOffset] = manualLabelRaw;
+    packet[SensorPacketProtocol.PredictedOffset] = predictedRaw;
+    return packet;
+}
+
+static byte[] MakeLegacy23Packet()
+{
+    var packet = new byte[SensorPacketProtocol.LegacyPacketLength];
+    MakePacket().AsSpan(0, packet.Length).CopyTo(packet);
     return packet;
 }
 

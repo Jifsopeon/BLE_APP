@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using BLE_APP.Models;
@@ -75,6 +75,9 @@ public sealed partial class MainPageModel : ObservableObject
 
     [ObservableProperty]
     private string _manualLabelText = "Waiting";
+
+    [ObservableProperty]
+    private string _predictedText = "Not Ready";
 
     [ObservableProperty]
     private string _manualLabelPendingText = string.Empty;
@@ -503,6 +506,11 @@ public sealed partial class MainPageModel : ObservableObject
     {
         Debug.WriteLine($"[CHART] MainViewModel appearing InstanceId={_instanceId}");
         UpdateState(_bluetooth.State);
+        if (_bluetooth.LatestReading is { } latestReading)
+        {
+            ApplyLatestReadingToCards(latestReading);
+        }
+
         return Task.CompletedTask;
     }
 
@@ -579,6 +587,7 @@ public sealed partial class MainPageModel : ObservableObject
             SetMetric("CO2", reading.Co2?.ToString() ?? "--");
             SetMetric("Distance", reading.DistanceMetres.ToString("0.00"));
             UpdateManualLabel(reading.ManualLabel);
+            PredictedText = SensorPacketProtocol.FormatPrediction(reading.Predicted);
         });
     }
 
@@ -669,6 +678,24 @@ public sealed partial class MainPageModel : ObservableObject
         }
     }
 
+    private void ApplyLatestReadingToCards(SensorReading reading)
+    {
+        HasReading = true;
+        LatestUpdateText = reading.Timestamp.ToLocalTime().ToString("HH:mm:ss");
+        PacketText = $"Packets: {_bluetooth.TotalPacketsReceived}  Malformed: {_bluetooth.MalformedPacketsReceived}  Gaps: {_bluetooth.SequenceGapsDetected}  Seq: {reading.SequenceNumber}";
+        SetMetric("PM1.0", Format(reading.Pm1, "0.0"));
+        SetMetric("PM2.5", Format(reading.Pm25, "0.0"));
+        SetMetric("PM4.0", Format(reading.Pm4, "0.0"));
+        SetMetric("PM10.0", Format(reading.Pm10, "0.0"));
+        SetMetric("Humidity", Format(reading.Humidity, "0.00"));
+        SetMetric("Temperature", Format(reading.Temperature, "0.00"));
+        SetMetric("NOx", Format(reading.Nox, "0.0"));
+        SetMetric("VOC", Format(reading.Voc, "0.0"));
+        SetMetric("CO2", reading.Co2?.ToString() ?? "--");
+        SetMetric("Distance", reading.DistanceMetres.ToString("0.00"));
+        UpdateManualLabel(reading.ManualLabel);
+        PredictedText = SensorPacketProtocol.FormatPrediction(reading.Predicted);
+    }
     private void OnLogStatusChanged(object? sender, string status)
         => MainThread.BeginInvokeOnMainThread(() =>
         {
@@ -676,27 +703,14 @@ public sealed partial class MainPageModel : ObservableObject
             LogFolderDisplayText = _sensorLog.LogFolderDisplayText;
         });
 
-    private async void OnUnexpectedlyDisconnected(object? sender, EventArgs e)
+    private void OnUnexpectedlyDisconnected(object? sender, EventArgs e)
     {
         MainThread.BeginInvokeOnMainThread(() =>
         {
-            ErrorText = "Device disconnected unexpectedly. Reconnect will retry automatically.";
+            ErrorText = "Automatic reconnect failed. Scan or reconnect when the sensor is available.";
             ClearManualLabelPending();
             UpdateState(BluetoothConnectionState.Disconnected);
         });
-
-        try
-        {
-            await _bluetooth.ReconnectAsync(CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            MainThread.BeginInvokeOnMainThread(() =>
-            {
-                ErrorText = $"Automatic reconnect failed: {ex.Message}";
-                UpdateState(BluetoothConnectionState.Disconnected);
-            });
-        }
     }
 
     private void UpsertDevice(DiscoveredSensorDevice device)
@@ -951,3 +965,5 @@ public sealed partial class MainPageModel : ObservableObject
 #endif
     }
 }
+
+

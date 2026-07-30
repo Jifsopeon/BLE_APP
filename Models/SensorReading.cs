@@ -14,4 +14,6 @@ public sealed record SensorReading(
     ushort? Co2,
     double DistanceMetres,
     ManualLabelState ManualLabel,
-    byte ManualLabelRaw);
+    byte ManualLabelRaw,
+    ManualLabelState Predicted,
+    byte PredictedRaw);
